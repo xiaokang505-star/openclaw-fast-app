@@ -15,11 +15,208 @@ export function getOpenClawConfigPath(): string {
 /** 应用内使用的 OpenClaw 基础配置项（阶段二表单），与 openclaw.json gateway / models 对齐 */
 export interface OpenClawFormConfig {
   modelSource?: 'cloud' | 'local';
-  apiKey?: string;
   defaultModel?: string;
   gatewayPort?: number;
   /** 网关鉴权 token，用于 /v1/chat/completions 的 Authorization: Bearer */
   gatewayToken?: string;
+  /** → models.providers.openai.apiKey */
+  openaiApiKey?: string;
+  /** → models.providers.anthropic.apiKey */
+  anthropicApiKey?: string;
+  /** → models.providers.google.apiKey（Gemini 等常用 google 提供方） */
+  googleGeminiApiKey?: string;
+  /** → channels.discord.enabled */
+  discordEnabled?: boolean;
+  /** → channels.discord.token；留空并保存表示删除已存 Token */
+  discordBotToken?: string;
+  /** → channels.discord.allowFrom（单用户）；留空并保存则移除该字段 */
+  discordAllowFromUserId?: string;
+  /** 与 allowFrom 一起写入 guilds[guildId].users；仅当非空时更新对应 guild 条目 */
+  discordGuildId?: string;
+  /** → channels.telegram.botToken */
+  telegramBotToken?: string;
+  /** → channels.slack.botToken */
+  slackBotToken?: string;
+  /** → channels.slack.appToken */
+  slackAppToken?: string;
+  /** → channels.feishu.appSecret */
+  feishuAppSecret?: string;
+  /** → channels.mattermost.botToken */
+  mattermostBotToken?: string;
+}
+
+function readProviderApiKey(config: Record<string, unknown> | null, providerId: string): string {
+  if (!config?.models || typeof config.models !== 'object') return '';
+  const providers = (config.models as Record<string, unknown>).providers;
+  if (!providers || typeof providers !== 'object') return '';
+  const p = (providers as Record<string, unknown>)[providerId];
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return '';
+  const k = (p as Record<string, unknown>).apiKey;
+  return typeof k === 'string' ? k : '';
+}
+
+function readChannelToken(config: Record<string, unknown> | null, channelId: string, nestedKey: string): string {
+  const ch = config?.channels as Record<string, unknown> | undefined;
+  const c = ch?.[channelId];
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return '';
+  const t = (c as Record<string, unknown>)[nestedKey];
+  return typeof t === 'string' ? t : '';
+}
+
+/** 合并 models.providers.<id>.apiKey；空字符串则删除该键，若 provider 无其它键则删除 provider */
+function mergeProviderApiKey(base: Record<string, unknown>, providerId: string, value: string | undefined): void {
+  if (value === undefined) return;
+  const models = (base.models && typeof base.models === 'object' ? { ...(base.models as object) } : {}) as Record<string, unknown>;
+  const providers = (models.providers && typeof models.providers === 'object' ? { ...(models.providers as object) } : {}) as Record<string, unknown>;
+  const prev = providers[providerId];
+  const p: Record<string, unknown> =
+    prev && typeof prev === 'object' && !Array.isArray(prev) ? { ...(prev as object) } : {};
+  const t = value.trim();
+  if (t) p.apiKey = t;
+  else delete p.apiKey;
+  if (Object.keys(p).length > 0) providers[providerId] = p;
+  else delete providers[providerId];
+  models.providers = providers;
+  base.models = models;
+}
+
+/** 合并 channels.<channelId>.<nestedKey>；空字符串则删除该嵌套键 */
+function mergeChannelNestedToken(
+  channels: Record<string, unknown>,
+  channelId: string,
+  nestedKey: string,
+  value: string | undefined
+): void {
+  if (value === undefined) return;
+  const t = value.trim();
+  const prev = channels[channelId];
+  const obj: Record<string, unknown> =
+    prev && typeof prev === 'object' && !Array.isArray(prev) ? { ...(prev as object) } : {};
+  if (t) obj[nestedKey] = t;
+  else delete obj[nestedKey];
+  if (Object.keys(obj).length > 0) channels[channelId] = obj;
+  else delete channels[channelId];
+}
+
+function mergeModelProviderKeysFromForm(base: Record<string, unknown>, form: OpenClawFormConfig): void {
+  mergeProviderApiKey(base, 'openai', form.openaiApiKey);
+  mergeProviderApiKey(base, 'anthropic', form.anthropicApiKey);
+  mergeProviderApiKey(base, 'google', form.googleGeminiApiKey);
+}
+
+function mergeChatChannelTokensFromForm(channels: Record<string, unknown>, form: OpenClawFormConfig): void {
+  mergeChannelNestedToken(channels, 'telegram', 'botToken', form.telegramBotToken);
+  mergeChannelNestedToken(channels, 'slack', 'botToken', form.slackBotToken);
+  mergeChannelNestedToken(channels, 'slack', 'appToken', form.slackAppToken);
+  mergeChannelNestedToken(channels, 'feishu', 'appSecret', form.feishuAppSecret);
+  mergeChannelNestedToken(channels, 'mattermost', 'botToken', form.mattermostBotToken);
+}
+
+const DISCORD_SNOWFLAKE = /^\d{17,22}$/;
+
+function parseDiscordAllowFromFirstId(allowFrom: unknown): string | undefined {
+  if (!Array.isArray(allowFrom)) return undefined;
+  for (const x of allowFrom) {
+    if (typeof x === 'string' && DISCORD_SNOWFLAKE.test(x.trim())) return x.trim();
+  }
+  return undefined;
+}
+
+/** 合并表单中的 Discord 段到 channels.discord；失败时抛出带文案的 Error */
+function mergeDiscordFromForm(
+  prevDiscord: Record<string, unknown> | undefined,
+  form: OpenClawFormConfig
+): Record<string, unknown> | undefined {
+  const discord: Record<string, unknown> =
+    prevDiscord && typeof prevDiscord === 'object' ? { ...prevDiscord } : {};
+
+  if (form.discordBotToken !== undefined) {
+    const t = form.discordBotToken.trim();
+    if (t) discord.token = t;
+    else delete discord.token;
+  }
+
+  const hasToken = typeof discord.token === 'string' && discord.token.trim().length > 0;
+
+  if (form.discordEnabled !== undefined) {
+    if (form.discordEnabled && !hasToken) {
+      throw new Error('启用 Discord 前请先填写 Bot Token，或取消勾选「启用 Discord」');
+    }
+    discord.enabled = Boolean(form.discordEnabled) && hasToken;
+  } else if (!hasToken) {
+    discord.enabled = false;
+  }
+
+  if (form.discordAllowFromUserId !== undefined) {
+    const u = form.discordAllowFromUserId.trim();
+    if (u) {
+      if (!DISCORD_SNOWFLAKE.test(u)) {
+        throw new Error('Discord 用户 ID 须为 17～22 位数字（Discord 开发者模式中复制）');
+      }
+      discord.allowFrom = [u];
+    } else {
+      delete discord.allowFrom;
+    }
+  }
+
+  if (form.discordGuildId !== undefined) {
+    const g = form.discordGuildId.trim();
+    const uid =
+      typeof form.discordAllowFromUserId === 'string'
+        ? form.discordAllowFromUserId.trim()
+        : parseDiscordAllowFromFirstId(discord.allowFrom) ?? '';
+    if (g) {
+      if (!DISCORD_SNOWFLAKE.test(g)) {
+        throw new Error('Discord 服务器 ID 须为 17～22 位数字');
+      }
+      if (!uid || !DISCORD_SNOWFLAKE.test(uid)) {
+        throw new Error('填写服务器 ID 时，请先填写「允许的 Discord 用户 ID」');
+      }
+      const guilds =
+        typeof discord.guilds === 'object' && discord.guilds !== null && !Array.isArray(discord.guilds)
+          ? { ...(discord.guilds as Record<string, unknown>) }
+          : {};
+      const prevG = guilds[g];
+      const entry: Record<string, unknown> =
+        typeof prevG === 'object' && prevG !== null && !Array.isArray(prevG) ? { ...(prevG as object) } : {};
+      entry.users = [uid];
+      if (entry.requireMention === undefined) entry.requireMention = true;
+      guilds[g] = entry;
+      discord.guilds = guilds;
+      discord.groupPolicy = 'allowlist';
+    }
+  }
+
+  const hasAllow = Array.isArray(discord.allowFrom) && discord.allowFrom.length > 0;
+  const hasGuilds =
+    typeof discord.guilds === 'object' && discord.guilds !== null && Object.keys(discord.guilds).length > 0;
+  const enabled = discord.enabled === true;
+  if (!hasToken && !enabled && !hasAllow && !hasGuilds) {
+    return undefined;
+  }
+  return discord;
+}
+
+/**
+ * 保证存在 channels.discord，且含显式 enabled，便于 OpenClaw 与本应用配置页识别「未启用 Discord」。
+ * 新建为 { enabled: false }；若已有对象但缺 enabled，则：有 token 则 true，否则 false。
+ */
+export function applyDefaultDiscordChannelStub(base: Record<string, unknown>): void {
+  const prev = base.channels;
+  const channels: Record<string, unknown> =
+    prev && typeof prev === 'object' && !Array.isArray(prev) ? { ...(prev as object) } : {};
+  const d = channels.discord;
+  if (d === undefined || d === null || typeof d !== 'object' || Array.isArray(d)) {
+    channels.discord = { enabled: false };
+  } else {
+    const disc = { ...(d as object) } as Record<string, unknown>;
+    if (disc.enabled === undefined) {
+      const hasToken = typeof disc.token === 'string' && disc.token.trim().length > 0;
+      disc.enabled = Boolean(hasToken);
+    }
+    channels.discord = disc;
+  }
+  base.channels = channels;
 }
 
 /** 宽松解析 JSON：去 BOM、行首注释、尾部逗号。行首注释才去除，避免误删 URL 里的 // */
@@ -97,12 +294,41 @@ export function getFormConfigFromRaw(config: Record<string, unknown> | null): Op
     }
   }
   const inferredLocal = (defaultModel?.startsWith('ollama/') || defaultModel?.startsWith('ollama-local/')) ?? false;
+
+  const ch = config.channels as { discord?: Record<string, unknown> } | undefined;
+  const disc = ch?.discord;
+  let discordBotToken = '';
+  let discordEnabled = false;
+  let discordAllowFromUserId = '';
+  let discordGuildId = '';
+  if (disc && typeof disc === 'object') {
+    discordBotToken = typeof disc.token === 'string' ? disc.token : '';
+    discordEnabled = disc.enabled === true;
+    const af = parseDiscordAllowFromFirstId(disc.allowFrom);
+    if (af) discordAllowFromUserId = af;
+    const guilds = disc.guilds;
+    if (guilds && typeof guilds === 'object' && !Array.isArray(guilds)) {
+      const keys = Object.keys(guilds);
+      if (keys.length > 0) discordGuildId = keys[0];
+    }
+  }
   return {
     modelSource: inferredLocal ? 'local' : 'cloud',
-    apiKey: undefined,
     defaultModel,
     gatewayPort: typeof gw?.port === 'number' ? gw.port : 18789,
     gatewayToken: typeof gw?.auth?.token === 'string' ? gw.auth.token : undefined,
+    openaiApiKey: readProviderApiKey(config, 'openai'),
+    anthropicApiKey: readProviderApiKey(config, 'anthropic'),
+    googleGeminiApiKey: readProviderApiKey(config, 'google'),
+    discordEnabled,
+    discordBotToken,
+    discordAllowFromUserId,
+    discordGuildId,
+    telegramBotToken: readChannelToken(config, 'telegram', 'botToken'),
+    slackBotToken: readChannelToken(config, 'slack', 'botToken'),
+    slackAppToken: readChannelToken(config, 'slack', 'appToken'),
+    feishuAppSecret: readChannelToken(config, 'feishu', 'appSecret'),
+    mattermostBotToken: readChannelToken(config, 'mattermost', 'botToken'),
   };
 }
 
@@ -139,6 +365,43 @@ export async function writeOpenClawConfig(
       agents.defaults = defaults;
       base.agents = agents;
     }
+
+    const channels = (base.channels && typeof base.channels === 'object' ? { ...(base.channels as object) } : {}) as Record<string, unknown>;
+    const prevD = channels.discord;
+    const prevDiscord =
+      prevD && typeof prevD === 'object' && !Array.isArray(prevD) ? (prevD as Record<string, unknown>) : undefined;
+    const discordTouched =
+      form.discordEnabled !== undefined ||
+      form.discordBotToken !== undefined ||
+      form.discordAllowFromUserId !== undefined ||
+      form.discordGuildId !== undefined;
+    if (discordTouched) {
+      try {
+        const nextDiscord = mergeDiscordFromForm(prevDiscord, form);
+        if (nextDiscord === undefined) {
+          delete channels.discord;
+        } else {
+          channels.discord = nextDiscord;
+        }
+      } catch (e) {
+        return { success: false, error: (e as Error).message };
+      }
+    }
+
+    mergeChatChannelTokensFromForm(channels, form);
+
+    if (Object.keys(channels).length === 0) {
+      delete base.channels;
+    } else {
+      base.channels = channels;
+    }
+
+    mergeModelProviderKeysFromForm(base, form);
+
+    // 历史版本曾写入 root.gui（OpenClaw 不识别）；保存时强制移除，避免 config invalid。
+    delete base.gui;
+
+    applyDefaultDiscordChannelStub(base);
 
     await fs.promises.writeFile(configPath, JSON.stringify(base, null, 2), 'utf8');
     return { success: true };
@@ -210,6 +473,7 @@ export async function ensureGatewayChatCompletionsEnabled(port = 18789): Promise
     const pl = (models.providers as Record<string, unknown>)['ollama-local'];
     if (pl && typeof pl === 'object') delete (pl as Record<string, unknown>).timeoutMs;
   }
+  applyDefaultDiscordChannelStub(base);
   await fs.promises.writeFile(configPath, JSON.stringify(base, null, 2), 'utf8');
   await ensureOllamaLocalAuthProfile();
 }

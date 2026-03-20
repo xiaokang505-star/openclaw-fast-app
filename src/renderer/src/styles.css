@@ -193,8 +193,57 @@ body {
   margin-bottom: 16px;
 }
 
+.config-help-section {
+  margin-bottom: 8px;
+}
+
+.config-help-section .config-alert :where(code) {
+  font-size: 0.9em;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--color-fill-2, #f2f3f5);
+}
+
+.config-help-btn {
+  margin-top: 8px;
+}
+
+.config-suffix-hint {
+  cursor: help;
+  color: var(--color-text-3, rgb(var(--gray-6)));
+  font-size: 12px;
+  padding: 0 4px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.config-suffix-hint:hover {
+  color: rgb(var(--primary-6));
+}
+
+.config-suffix-hint--inline {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.config-card .arco-divider {
+  margin: 16px 0 12px 0;
+}
+
 .config-card .config-form {
   max-width: 480px;
+}
+
+.config-card .config-form-wide {
+  max-width: 640px;
+}
+
+.config-card .config-collapse {
+  margin-bottom: 8px;
+}
+
+.config-card .config-collapse .arco-collapse-item-content {
+  background: transparent;
 }
 
 /* 阶段三：主界面 Agent（OpenClaw），输入框固定在底部 */
@@ -363,4 +412,33 @@ body {
   margin: 1em 0;
   border: none;
   border-top: 1px solid var(--color-border-2, #e5e6eb);
+}
+
+.gui-audit-table-wrap {
+  margin-top: 8px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--color-border-2, #e5e6eb);
+  border-radius: 8px;
+}
+
+.gui-audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.gui-audit-table th,
+.gui-audit-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border-2, #f2f3f5);
+  vertical-align: top;
+}
+
+.gui-audit-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-fill-2, #f7f8fa);
 }

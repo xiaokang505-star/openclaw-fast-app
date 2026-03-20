@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { applyDefaultDiscordChannelStub } from './openclaw-config';
 
 const CONFIG_PATH = path.join(os.homedir(), '.openclaw', 'openclaw.json');
 const OLLAMA_PROVIDER_ID = 'ollama-local';
@@ -48,6 +49,7 @@ export async function writeOllamaProvider(selectedModelName: string): Promise<{ 
     // 文件不存在或解析失败，使用空对象
   }
   config = mergeOllamaProviderIntoConfig(config, selectedModelName);
+  applyDefaultDiscordChannelStub(config);
   const dir = path.dirname(CONFIG_PATH);
   try {
     await fs.promises.mkdir(dir, { recursive: true });

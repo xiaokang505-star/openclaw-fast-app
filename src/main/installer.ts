@@ -118,6 +118,17 @@ export async function installDaemonHandler(): Promise<{
 
 const GATEWAY_START_WAIT_MS = 25000;
 
+/** OpenClaw 网关运行时要求 Node >=22.16（与 CLI 入口的 22.12 校验可能不一致） */
+function gatewayLogHint(tail: string): string {
+  if (/Node\s*>=?\s*22\.16|requires Node >=22\.16/i.test(tail)) {
+    return (
+      '\n\n提示：当前全局 OpenClaw 要求 Node.js 22.16.0 或更高。若在终端执行 `node -v` 低于 22.16，请用 nvm 升级：' +
+      '`nvm install 22`（或 `nvm install node`）后 `nvm alias default 22`，再在应用「设置」中填写 Node 可执行文件路径并保存，然后重新「由本应用启动网关」。'
+    );
+  }
+  return '';
+}
+
 /** 由本应用直接启动网关进程（不安装系统 Daemon，兼容性更好；关闭应用后网关会停止） */
 export async function startGatewayInProcessHandler(): Promise<{
   success: boolean;
@@ -198,9 +209,10 @@ export async function startGatewayInProcessHandler(): Promise<{
     if (gatewayExited && gatewayExitCode !== 0) {
       const tail = gatewayStderr.trim() || gatewayStdout.trim();
       const logSnippet = tail ? `\n\n网关进程输出（最后 600 字）：\n${tail.slice(-600)}` : '';
+      const hint = gatewayLogHint(tail);
       return {
         success: false,
-        error: `网关进程已退出，退出码: ${gatewayExitCode}。${logSnippet || ' 请在终端运行 openclaw gateway --port ' + port + ' --allow-unconfigured 查看完整启动日志。'}`,
+        error: `网关进程已退出，退出码: ${gatewayExitCode}。${logSnippet || ' 请在终端运行 openclaw gateway --port ' + port + ' --allow-unconfigured 查看完整启动日志。'}${hint}`,
       };
     }
     try {
@@ -212,9 +224,10 @@ export async function startGatewayInProcessHandler(): Promise<{
   }
   const tail = gatewayStderr.trim() || gatewayStdout.trim();
   const logSnippet = tail ? `\n\n网关进程输出（最后 600 字）：\n${tail.slice(-600)}` : '';
+  const hint = gatewayLogHint(tail);
   return {
     success: false,
-    error: `网关在 ${GATEWAY_START_WAIT_MS / 1000} 秒内未在端口 ${port} 响应。请检查：1) 端口是否被占用（终端运行 lsof -i :${port}）；2) openclaw 是否安装正常（终端运行 openclaw gateway --port ${port} --allow-unconfigured 查看启动日志）；3) 若网关启动较慢可稍后重试。${logSnippet}`,
+    error: `网关在 ${GATEWAY_START_WAIT_MS / 1000} 秒内未在端口 ${port} 响应。请检查：1) 端口是否被占用（终端运行 lsof -i :${port}）；2) openclaw 是否安装正常（终端运行 openclaw gateway --port ${port} --allow-unconfigured 查看启动日志）；3) 若网关启动较慢可稍后重试。${logSnippet}${hint}`,
   };
 }
 

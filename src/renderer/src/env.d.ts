@@ -19,20 +19,63 @@ export interface AppSettings {
   chatBackend?: 'ollama' | 'openclaw';
   /** 经 OpenClaw 网关对话超时（秒），30～300，默认 90 */
   gatewayChatTimeoutSec?: number;
+  guiEnabled?: boolean;
+  guiAllowApps?: string;
+  guiRequireConfirmForDangerous?: boolean;
 }
 
 export interface OpenClawFormConfig {
   modelSource?: 'cloud' | 'local';
-  apiKey?: string;
   defaultModel?: string;
   gatewayPort?: number;
   gatewayToken?: string;
+  openaiApiKey?: string;
+  anthropicApiKey?: string;
+  googleGeminiApiKey?: string;
+  discordEnabled?: boolean;
+  discordBotToken?: string;
+  discordAllowFromUserId?: string;
+  discordGuildId?: string;
+  telegramBotToken?: string;
+  slackBotToken?: string;
+  slackAppToken?: string;
+  feishuAppSecret?: string;
+  mattermostBotToken?: string;
 }
 
 export interface RegistryPreset {
   id: string;
   name: string;
   url: string;
+}
+
+export interface GuiExecutionReceipt {
+  mode: 'gui';
+  status: 'blocked' | 'confirmed' | 'executing';
+  risk: 'low' | 'medium' | 'high';
+  reason: string;
+  requestedApp?: string | null;
+  allowApps?: string[];
+  taskId?: string;
+  stepIndex?: number;
+  stepTotal?: number;
+  failedStepId?: string;
+  failedReason?: string;
+}
+
+export interface GuiAuditLogEntry {
+  ts: string;
+  status: 'blocked' | 'confirmed' | 'bypassed' | 'executing';
+  reason: string;
+  risk: 'low' | 'medium' | 'high';
+  message: string;
+  allowApps?: string[];
+  requestedApp?: string | null;
+  taskId?: string;
+  stepId?: string;
+  stepAction?: string;
+  stepIndex?: number;
+  stepTotal?: number;
 }
 
 declare global {
@@ -59,9 +102,11 @@ declare global {
       openclawGateway500Diagnostic: () => Promise<{ summary: string; details: string[] }>;
       testGatewayV1Models: () => Promise<{ success: boolean; status?: number; statusText?: string; modelIds?: string[]; rawBody?: string; error?: string; chatCompletionsCheck?: { ok: boolean; status: number; bodyPreview: string }; diagnosticDetails?: string[] }>;
       verifyRequestChain: () => Promise<{ ollama: { ok: boolean; ms: number; error?: string }; gateway: { ok: boolean; ms: number; error?: string }; model: string }>;
+      getGuiAuditLogs: (limit?: number) => Promise<GuiAuditLogEntry[]>;
+      exportGuiAuditLogs: (payload: string) => Promise<{ success: boolean; path?: string; error?: string }>;
       openclawChatSend: (messages: { role: string; content: string }[], stream?: boolean) => Promise<{ success: boolean; content?: string; error?: string }>;
       ollamaChatSend: (messages: { role: string; content: string }[], stream?: boolean, model?: string) => Promise<{ success: boolean; content?: string; error?: string }>;
-      chatSend: (messages: { role: string; content: string }[], stream?: boolean) => Promise<{ success: boolean; content?: string; error?: string }>;
+      chatSend: (messages: { role: string; content: string }[], stream?: boolean) => Promise<{ success: boolean; content?: string; error?: string; executionReceipt?: GuiExecutionReceipt }>;
       onChatStreamDelta: (callback: (delta: string) => void) => () => void;
       onChatStreamDone: (callback: () => void) => () => void;
       ollamaIsRunning: () => Promise<boolean>;

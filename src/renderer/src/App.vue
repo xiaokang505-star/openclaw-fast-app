@@ -3,15 +3,78 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import type { DetectionReport, StepResult } from './types';
+import type { GuiExecutionReceipt, GuiAuditLogEntry } from './env';
 
 const MARKDOWN_PLACEHOLDER = '<span class="msg-placeholder">…</span>';
 const STREAMING_PLACEHOLDER = '<span class="msg-placeholder">等待首字…（首 token 可能需 1～2 分钟，请勿关闭）</span>';
+
+/** OpenClaw 配置页 · Discord 表单项 suffix 内说明（空值行为见各条文案） */
+const DISCORD_TOOLTIP_TOKEN =
+  '在 Discord 开发者门户创建 Application → Bot → Reset Token。对应 channels.discord.token。留空并保存将删除已保存的 Token，并自动关闭「启用 Discord」。';
+const DISCORD_TOOLTIP_USER =
+  '开启 Discord「开发者模式」后，右键自己的头像 → 复制用户 ID。写入 channels.discord.allowFrom（本应用保存为单元素数组）。留空并保存会移除 allowFrom，由 OpenClaw 使用默认私信策略。';
+const DISCORD_TOOLTIP_GUILD =
+  '右键服务器图标 → 复制服务器 ID。与用户 ID 一并写入 channels.discord.guilds[服务器ID].users，并设置 groupPolicy 为 allowlist。留空则本表单不新增/覆盖 guild 条目；删除条目请打开配置目录手动编辑。';
+const DISCORD_TOOLTIP_ENABLED = '关闭后写入 channels.discord.enabled=false；无 Token 时无法开启。';
+
+const MODEL_TOOLTIP_OPENAI =
+  '写入 openclaw.json → models.providers.openai.apiKey，供 OpenAI 兼容路由使用。留空并保存将移除该键（保留 provider 内其它字段）。勿将密钥提交到 Git。';
+const MODEL_TOOLTIP_ANTHROPIC =
+  '对应 models.providers.anthropic.apiKey。用于 Claude 等 Anthropic 提供方。留空并保存则清除已保存的 apiKey。';
+const MODEL_TOOLTIP_GOOGLE =
+  '对应 models.providers.google.apiKey（常见为 Google AI / Gemini API Key）。具体模型 id 仍由 agents.defaults.model 决定。留空并保存则清除。';
+const CHAT_TOOLTIP_TELEGRAM =
+  '对应 channels.telegram.botToken（@BotFather 获取）。留空并保存则删除该键。详见 OpenClaw Telegram 文档。';
+const CHAT_TOOLTIP_SLACK_BOT =
+  '对应 channels.slack.botToken（Bot User OAuth Token 等，以官方文档为准）。留空并保存则删除。';
+const CHAT_TOOLTIP_SLACK_APP =
+  '对应 channels.slack.appToken（Socket Mode 等场景）。不需要可留空。';
+const CHAT_TOOLTIP_FEISHU =
+  '对应 channels.feishu.appSecret（飞书开放平台应用凭证）。留空并保存则删除。';
+const CHAT_TOOLTIP_MATTERMOST =
+  '对应 channels.mattermost.botToken。留空并保存则删除。';
+const GUI_TOOLTIP_ENABLED =
+  '开启后，检测到“打开/点击/输入”等 GUI 意图会强制走 OpenClaw 网关执行路径；关闭则此类请求会被拦截提示。';
+const GUI_TOOLTIP_ALLOW_APPS =
+  'GUI 应用白名单，逗号分隔（如 Finder, WeChat, Chrome）。仅用于策略提示与后续策略层，建议按常用应用维护。';
+const GUI_TOOLTIP_CONFIRM =
+  '高风险 GUI 动作（删除、覆盖、系统设置修改）执行前是否要求二次确认。建议保持开启。';
 
 /** 将 Markdown 转为安全 HTML（用于对话气泡内展示） */
 function renderMarkdown(text: string): string {
   if (!text?.trim()) return MARKDOWN_PLACEHOLDER;
   const rawHtml = marked.parse(text.trim(), { async: false }) as string;
   return DOMPurify.sanitize(rawHtml, { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 's', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'a', 'hr', 'span', 'div'] });
+}
+
+function renderExecutionReceipt(r?: GuiExecutionReceipt): string {
+  if (!r) return '';
+  const statusMap: Record<GuiExecutionReceipt['status'], string> = {
+    blocked: '已阻断',
+    confirmed: '已确认',
+    executing: '执行中',
+  };
+  const app = r.requestedApp ? `「${r.requestedApp}」` : '目标应用';
+  const reasonFriendlyMap: Record<string, string> = {
+    direct_open_app_ok: `已开始为你打开${app}。`,
+    direct_hotkey_ok: '已发送快捷键操作。',
+    direct_type_text_ok: '已执行文本输入。',
+    gui_disabled: 'GUI 功能当前未开启，请先在配置中打开后再试。',
+    app_not_in_allowlist: `${app} 不在允许列表中，已为你拦截。`,
+    user_declined_high_risk: '你已取消高风险操作，本次未执行。',
+    direct_open_app_failed: `打开${app}失败，请确认应用已安装且名称正确。`,
+    direct_hotkey_failed: '快捷键执行失败，请检查辅助功能权限。',
+    direct_type_text_failed: '文本输入失败，请检查辅助功能权限。',
+    gui_task_ok: '多步 GUI 任务已完成。',
+    gui_task_failed: '多步 GUI 任务执行失败。',
+  };
+  const friendly = reasonFriendlyMap[r.reason] ?? 'GUI 指令已受理。';
+  const detailApp = r.requestedApp ? `；目标：${r.requestedApp}` : '';
+  const progress = typeof r.stepIndex === 'number' && typeof r.stepTotal === 'number'
+    ? `；进度：${r.stepIndex}/${r.stepTotal}`
+    : '';
+  const fail = r.failedReason ? `；失败原因：${r.failedReason}` : '';
+  return `${friendly}\n[GUI回执] 状态：${statusMap[r.status]}；风险：${r.risk}${detailApp}${progress}${fail}`;
 }
 
 const platformInfo = ref('正在获取系统信息…');
@@ -35,13 +98,55 @@ const installOpenClawLog = ref('');
 const installOpenClawRunning = ref(false);
 const installDaemonRunning = ref(false);
 const startGatewayInProcessRunning = ref(false);
-const openclawForm = ref<{ modelSource: 'cloud' | 'local'; apiKey: string; defaultModel: string; gatewayPort: number; gatewayToken: string }>({
+const openclawForm = ref<{
+  modelSource: 'cloud' | 'local';
+  defaultModel: string;
+  gatewayPort: number;
+  gatewayToken: string;
+  openaiApiKey: string;
+  anthropicApiKey: string;
+  googleGeminiApiKey: string;
+  discordEnabled: boolean;
+  discordBotToken: string;
+  discordAllowFromUserId: string;
+  discordGuildId: string;
+  telegramBotToken: string;
+  slackBotToken: string;
+  slackAppToken: string;
+  feishuAppSecret: string;
+  mattermostBotToken: string;
+  guiEnabled: boolean;
+  guiAllowApps: string;
+  guiRequireConfirmForDangerous: boolean;
+}>({
   modelSource: 'cloud',
-  apiKey: '',
   defaultModel: '',
   gatewayPort: 18789,
   gatewayToken: '',
+  openaiApiKey: '',
+  anthropicApiKey: '',
+  googleGeminiApiKey: '',
+  discordEnabled: false,
+  discordBotToken: '',
+  discordAllowFromUserId: '',
+  discordGuildId: '',
+  telegramBotToken: '',
+  slackBotToken: '',
+  slackAppToken: '',
+  feishuAppSecret: '',
+  mattermostBotToken: '',
+  guiEnabled: false,
+  guiAllowApps: '',
+  guiRequireConfirmForDangerous: true,
 });
+
+watch(
+  () => openclawForm.value.discordBotToken,
+  (t) => {
+    if (!t.trim()) openclawForm.value.discordEnabled = false;
+  }
+);
+
 const agentInput = ref('');
 const configSaveLoading = ref(false);
 const agentMessages = ref<{ role: 'user' | 'assistant'; content: string }[]>([]);
@@ -61,6 +166,22 @@ let unsubOllamaProgress: (() => void) | null = null;
 const settingsOpenclawVersion = ref('latest');
 const settingsReinstallOpenClawRunning = ref(false);
 const settingsReinstallOpenClawLog = ref('');
+const settingsGuiAuditLogs = ref<GuiAuditLogEntry[]>([]);
+const settingsGuiAuditLoading = ref(false);
+const settingsGuiAuditStatusFilter = ref<'all' | 'blocked' | 'executing'>('all');
+const settingsGuiAuditRiskFilter = ref<'all' | 'high' | 'medium' | 'low'>('all');
+const settingsGuiAuditFiltered = computed(() =>
+  settingsGuiAuditLogs.value.filter((x) => {
+    if (settingsGuiAuditStatusFilter.value !== 'all' && x.status !== settingsGuiAuditStatusFilter.value) return false;
+    if (settingsGuiAuditRiskFilter.value !== 'all' && x.risk !== settingsGuiAuditRiskFilter.value) return false;
+    return true;
+  })
+);
+const settingsGuiAuditExportText = computed(() =>
+  settingsGuiAuditFiltered.value
+    .map((x) => `[${x.ts}] status=${x.status} risk=${x.risk} reason=${x.reason}${x.requestedApp ? ` app=${x.requestedApp}` : ''}\n  message=${x.message}`)
+    .join('\n\n')
+);
 const settingsOllamaModelsForApply = ref<{ name: string }[]>([]);
 const settingsSelectedOllamaForApply = ref('');
 const settingsApplyLocalModelLoading = ref(false);
@@ -219,10 +340,35 @@ async function onSettings() {
       ? Math.min(300, Math.max(30, Math.round(rawSec)))
       : 90;
     await loadSettingsOllamaModels();
+    await loadGuiAuditLogs();
     view.value = 'settings';
   } catch {
     view.value = 'settings';
   }
+}
+
+async function loadGuiAuditLogs() {
+  if (!window.electronAPI?.getGuiAuditLogs || settingsGuiAuditLoading.value) return;
+  settingsGuiAuditLoading.value = true;
+  try {
+    settingsGuiAuditLogs.value = await window.electronAPI.getGuiAuditLogs(60);
+  } catch {
+    settingsGuiAuditLogs.value = [];
+  } finally {
+    settingsGuiAuditLoading.value = false;
+  }
+}
+
+async function exportGuiAuditLogs() {
+  if (!window.electronAPI?.exportGuiAuditLogs) return;
+  const payload = settingsGuiAuditExportText.value;
+  if (!payload.trim()) {
+    alert('当前筛选结果为空，无可导出内容。');
+    return;
+  }
+  const r = await window.electronAPI.exportGuiAuditLogs(payload);
+  if (r.success) alert(`已导出 GUI 审计日志：${r.path}`);
+  else alert(r.error ?? '导出失败');
 }
 
 async function saveSettings() {
@@ -558,14 +704,31 @@ async function onEnterConfig(returnTo: 'guide' | 'agent' | 'settings' = 'guide')
   configReturnTo.value = returnTo;
   view.value = 'config';
   try {
-    const { form } = await window.electronAPI?.getOpenClawConfig?.() ?? { form: null };
+    const [{ form }, settings] = await Promise.all([
+      window.electronAPI?.getOpenClawConfig?.() ?? Promise.resolve({ form: null }),
+      window.electronAPI?.getSettings?.() ?? Promise.resolve({} as AppSettings),
+    ]);
     if (form) {
       openclawForm.value = {
         modelSource: form.modelSource ?? 'cloud',
-        apiKey: form.apiKey ?? '',
         defaultModel: form.defaultModel ?? '',
         gatewayPort: form.gatewayPort ?? 18789,
         gatewayToken: form.gatewayToken ?? '',
+        openaiApiKey: form.openaiApiKey ?? '',
+        anthropicApiKey: form.anthropicApiKey ?? '',
+        googleGeminiApiKey: form.googleGeminiApiKey ?? '',
+        discordEnabled: form.discordEnabled === true,
+        discordBotToken: form.discordBotToken ?? '',
+        discordAllowFromUserId: form.discordAllowFromUserId ?? '',
+        discordGuildId: form.discordGuildId ?? '',
+        telegramBotToken: form.telegramBotToken ?? '',
+        slackBotToken: form.slackBotToken ?? '',
+        slackAppToken: form.slackAppToken ?? '',
+        feishuAppSecret: form.feishuAppSecret ?? '',
+        mattermostBotToken: form.mattermostBotToken ?? '',
+        guiEnabled: settings.guiEnabled === true,
+        guiAllowApps: settings.guiAllowApps ?? '',
+        guiRequireConfirmForDangerous: settings.guiRequireConfirmForDangerous !== false,
       };
     }
   } catch {
@@ -579,16 +742,32 @@ async function onCompleteConfig() {
   try {
     const r = await window.electronAPI.setOpenClawConfig({
       modelSource: openclawForm.value.modelSource,
-      apiKey: openclawForm.value.apiKey || undefined,
       defaultModel: openclawForm.value.defaultModel || undefined,
       gatewayPort: openclawForm.value.gatewayPort,
       gatewayToken: openclawForm.value.gatewayToken || undefined,
+      openaiApiKey: openclawForm.value.openaiApiKey,
+      anthropicApiKey: openclawForm.value.anthropicApiKey,
+      googleGeminiApiKey: openclawForm.value.googleGeminiApiKey,
+      discordEnabled: openclawForm.value.discordEnabled,
+      discordBotToken: openclawForm.value.discordBotToken,
+      discordAllowFromUserId: openclawForm.value.discordAllowFromUserId,
+      discordGuildId: openclawForm.value.discordGuildId,
+      telegramBotToken: openclawForm.value.telegramBotToken,
+      slackBotToken: openclawForm.value.slackBotToken,
+      slackAppToken: openclawForm.value.slackAppToken,
+      feishuAppSecret: openclawForm.value.feishuAppSecret,
+      mattermostBotToken: openclawForm.value.mattermostBotToken,
     });
     if (!r.success) {
       alert(r.error ?? '保存配置失败');
       return;
     }
-    await window.electronAPI.setSettings({ wizardCompleted: true });
+    await window.electronAPI.setSettings({
+      wizardCompleted: true,
+      guiEnabled: openclawForm.value.guiEnabled,
+      guiAllowApps: openclawForm.value.guiAllowApps,
+      guiRequireConfirmForDangerous: openclawForm.value.guiRequireConfirmForDangerous,
+    });
     view.value = 'agent';
   } finally {
     configSaveLoading.value = false;
@@ -696,7 +875,15 @@ async function onAgentSend() {
     });
     try {
       const r = await window.electronAPI.chatSend(messages, true);
-      if (!r.success) agentMessages.value[assistantIndex].content = r.error ?? '请求失败';
+      const receiptText = renderExecutionReceipt(r.executionReceipt);
+      if (receiptText) {
+        const prev = agentMessages.value[assistantIndex].content || '';
+        agentMessages.value[assistantIndex].content = prev ? `${receiptText}\n\n${prev}` : receiptText;
+      }
+      if (!r.success) {
+        const base = r.error ?? '请求失败';
+        agentMessages.value[assistantIndex].content = receiptText ? `${receiptText}\n\n${base}` : base;
+      }
     } catch (e) {
       agentMessages.value[assistantIndex].content = (e as Error)?.message ?? '请求异常，请重试。';
     } finally {
@@ -729,6 +916,11 @@ async function onAgentSend() {
         agentMessages.value[assistantIndex].content = r.content;
       } else {
         agentMessages.value[assistantIndex].content = r.error ?? '请求失败';
+      }
+      const receiptText = renderExecutionReceipt(r.executionReceipt);
+      if (receiptText) {
+        const prev = agentMessages.value[assistantIndex].content || '';
+        agentMessages.value[assistantIndex].content = prev ? `${receiptText}\n\n${prev}` : receiptText;
       }
       if (agentMessages.value[assistantIndex].content === '') {
         agentMessages.value[assistantIndex].content = '未收到回复，请检查网关是否已启动且鉴权 Token 正确。';
@@ -861,7 +1053,7 @@ function onOpenConfig(fromAgent = true) {
           <a-alert
             v-if="!detectionResult.canEnterGuide"
             type="warning"
-            message="当前系统或架构不在支持列表中，无法进入安装引导。请查看文档或更换环境。"
+            title="当前系统或架构不在支持列表中，无法进入安装引导。请查看文档或更换环境。"
             class="result-alert"
           />
           <a-space class="result-actions" size="medium">
@@ -993,20 +1185,87 @@ function onOpenConfig(fromAgent = true) {
 
       <!-- 阶段二：OpenClaw 配置（可从引导、主界面、设置进入） -->
       <a-card v-else-if="view === 'config'" class="config-card" title="OpenClaw 基础配置" :bordered="false">
-        <a-alert type="info" message="在此配置 OpenClaw 的模型来源、API Key、网关端口等，配置会写入 ~/.openclaw/openclaw.json。" class="config-alert" />
-        <a-form layout="vertical" class="config-form">
+        <a-alert
+          type="info"
+          title="配置将写入 ~/.openclaw/openclaw.json：板块一为默认模型与各云端 API Key（models.providers.*）及网关；板块二为聊天渠道 Token（channels.*）。保存后请按需重启网关。"
+          class="config-alert"
+        />
+        <a-divider orientation="left">说明与排查</a-divider>
+        <div class="config-help-section">
+          <a-alert type="warning" class="config-alert" title="本地 Ollama 与网关主代理">
+            <a-typography-paragraph>
+              主代理会向 Ollama 使用 <strong>tools / function calling</strong>。请勿将默认模型设为 <code>llama3:latest</code>（常见报错：<code>does not support tools</code>）。请改用
+              <code>llama3.2</code>、<code>llama3.1</code>、<code>qwen2.5:7b</code> 等，并保证上下文 ≥ 16000。可在「设置」中用「一键应用本地模型」写入 provider 与 contextWindow。
+            </a-typography-paragraph>
+          </a-alert>
+          <a-alert type="normal" class="config-alert" title="消息渠道（Discord 等）">
+            <a-typography-paragraph>
+              若网关日志出现 <code>Unknown target "your_user_id"</code> 等报错，多为示例占位符或未配置渠道。可在下方「Discord / 消息」表单填写 Token 与用户 ID，或在配置目录手动编辑。
+            </a-typography-paragraph>
+            <a-button type="outline" size="small" class="config-help-btn" @click="openConfigDir">打开 ~/.openclaw 配置目录</a-button>
+          </a-alert>
+          <a-alert type="success" class="config-alert" title="生效方式">
+            <a-typography-paragraph>
+              修改 <code>openclaw.json</code> 或渠道相关文件后，请到「设置」中先「停止网关」再「由本应用启动网关」，或终端重启 <code>openclaw gateway</code>，否则可能仍加载旧配置。
+            </a-typography-paragraph>
+          </a-alert>
+        </div>
+        <a-divider orientation="left">一、大模型与 API</a-divider>
+        <a-form layout="vertical" class="config-form config-form-wide">
           <a-form-item label="模型来源">
             <a-radio-group v-model="openclawForm.modelSource">
               <a-radio value="cloud">云端 API</a-radio>
               <a-radio value="local">本地 Ollama</a-radio>
             </a-radio-group>
           </a-form-item>
-          <a-form-item v-if="openclawForm.modelSource === 'cloud'" label="API Key（可选）">
-            <a-input-password v-model="openclawForm.apiKey" placeholder="若使用云端模型可在此填写" allow-clear />
-          </a-form-item>
-          <a-form-item label="默认模型">
-            <a-input v-model="openclawForm.defaultModel" placeholder="如 gpt-4o、ollama/llama2 等" allow-clear />
-          </a-form-item>
+          <template v-if="openclawForm.modelSource === 'cloud'">
+            <a-typography-text type="secondary" class="form-hint">已选择云端 API：请在下方填写主流模型提供方密钥。</a-typography-text>
+            <a-collapse :default-active-key="['openai']" class="config-collapse">
+              <a-collapse-item key="openai" header="OpenAI">
+                <a-form-item label="OpenAI API Key">
+                  <a-input-password v-model="openclawForm.openaiApiKey" placeholder="sk-…；留空并保存可清除已写入的 keys" allow-clear>
+                    <template #suffix>
+                      <a-tooltip :content="MODEL_TOOLTIP_OPENAI" position="left">
+                        <span class="config-suffix-hint">说明</span>
+                      </a-tooltip>
+                    </template>
+                  </a-input-password>
+                </a-form-item>
+              </a-collapse-item>
+              <a-collapse-item key="anthropic" header="Anthropic / Claude">
+                <a-form-item label="Anthropic API Key">
+                  <a-input-password v-model="openclawForm.anthropicApiKey" placeholder="留空并保存可清除" allow-clear>
+                    <template #suffix>
+                      <a-tooltip :content="MODEL_TOOLTIP_ANTHROPIC" position="left">
+                        <span class="config-suffix-hint">说明</span>
+                      </a-tooltip>
+                    </template>
+                  </a-input-password>
+                </a-form-item>
+              </a-collapse-item>
+              <a-collapse-item key="google" header="Google / Gemini">
+                <a-form-item label="Google / Gemini API Key">
+                  <a-input-password v-model="openclawForm.googleGeminiApiKey" placeholder="留空并保存可清除" allow-clear>
+                    <template #suffix>
+                      <a-tooltip :content="MODEL_TOOLTIP_GOOGLE" position="left">
+                        <span class="config-suffix-hint">说明</span>
+                      </a-tooltip>
+                    </template>
+                  </a-input-password>
+                </a-form-item>
+              </a-collapse-item>
+            </a-collapse>
+          </template>
+          <template v-else>
+            <a-form-item label="默认模型">
+              <a-input
+                v-model="openclawForm.defaultModel"
+                placeholder="本地 Ollama 建议 ollama-local/llama3.2（勿用 llama3:latest）"
+                allow-clear
+              />
+              <a-typography-text type="secondary" class="form-hint">与 <code>agents.defaults.model.primary</code> 对应；本地模型 id 常与 <code>ollama-local/模型名</code> 一致</a-typography-text>
+            </a-form-item>
+          </template>
           <a-form-item label="网关端口">
             <a-input-number v-model="openclawForm.gatewayPort" :min="1024" :max="65535" placeholder="18789" style="width: 120px" />
             <a-typography-text type="secondary" class="form-hint">OpenClaw Daemon 监听端口，默认 18789</a-typography-text>
@@ -1015,6 +1274,123 @@ function onOpenConfig(fromAgent = true) {
             <a-input-password v-model="openclawForm.gatewayToken" placeholder="与 openclaw.json 中 gateway.auth.token 一致；使用「由本应用启动网关」时会自动写入默认值，一般无需填写" allow-clear />
             <a-typography-text type="secondary" class="form-hint">若在浏览器打开 Control 控制页（http://127.0.0.1:端口），需在 Control 设置中粘贴与此处相同的 Token，否则会报 token_mismatch</a-typography-text>
           </a-form-item>
+
+          <a-divider orientation="left">GUI 操作策略</a-divider>
+          <a-form-item label="启用 GUI 操作路径">
+            <a-switch v-model="openclawForm.guiEnabled" />
+            <a-tooltip :content="GUI_TOOLTIP_ENABLED" position="left">
+              <span class="config-suffix-hint config-suffix-hint--inline">?</span>
+            </a-tooltip>
+          </a-form-item>
+          <a-form-item label="允许操作的应用（白名单，逗号分隔）">
+            <a-input v-model="openclawForm.guiAllowApps" placeholder="如 Finder, WeChat, Chrome" allow-clear>
+              <template #suffix>
+                <a-tooltip :content="GUI_TOOLTIP_ALLOW_APPS" position="left">
+                  <span class="config-suffix-hint">说明</span>
+                </a-tooltip>
+              </template>
+            </a-input>
+          </a-form-item>
+          <a-form-item label="高风险动作执行前确认">
+            <a-switch v-model="openclawForm.guiRequireConfirmForDangerous" />
+            <a-tooltip :content="GUI_TOOLTIP_CONFIRM" position="left">
+              <span class="config-suffix-hint config-suffix-hint--inline">?</span>
+            </a-tooltip>
+          </a-form-item>
+
+          <a-divider orientation="left">二、聊天工具与 Token</a-divider>
+          <a-collapse :default-active-key="['discord']" class="config-collapse">
+            <a-collapse-item key="discord" header="Discord">
+              <a-form-item label="启用 Discord">
+                <a-switch v-model="openclawForm.discordEnabled" :disabled="!openclawForm.discordBotToken.trim()" />
+                <a-tooltip :content="DISCORD_TOOLTIP_ENABLED">
+                  <span class="config-suffix-hint config-suffix-hint--inline">?</span>
+                </a-tooltip>
+                <a-typography-text type="secondary" class="form-hint">需先填写 Bot Token 才能开启；仅写入 channels.discord.enabled</a-typography-text>
+              </a-form-item>
+              <a-form-item label="Discord Bot Token">
+                <a-input-password v-model="openclawForm.discordBotToken" placeholder="留空并保存可清除已保存的 Token" allow-clear>
+                  <template #suffix>
+                    <a-tooltip :content="DISCORD_TOOLTIP_TOKEN" position="left">
+                      <span class="config-suffix-hint">说明</span>
+                    </a-tooltip>
+                  </template>
+                </a-input-password>
+              </a-form-item>
+              <a-form-item label="允许的 Discord 用户 ID（私信白名单）">
+                <a-input v-model="openclawForm.discordAllowFromUserId" placeholder="17～22 位数字；留空并保存则移除 allowFrom" allow-clear>
+                  <template #suffix>
+                    <a-tooltip :content="DISCORD_TOOLTIP_USER" position="left">
+                      <span class="config-suffix-hint">说明</span>
+                    </a-tooltip>
+                  </template>
+                </a-input>
+              </a-form-item>
+              <a-form-item label="Discord 服务器 ID（可选，公会白名单）">
+                <a-input v-model="openclawForm.discordGuildId" placeholder="与上方用户 ID 同时填写时写入 guilds；单独留空不修改已有 guilds" allow-clear>
+                  <template #suffix>
+                    <a-tooltip :content="DISCORD_TOOLTIP_GUILD" position="left">
+                      <span class="config-suffix-hint">说明</span>
+                    </a-tooltip>
+                  </template>
+                </a-input>
+              </a-form-item>
+            </a-collapse-item>
+            <a-collapse-item key="telegram" header="Telegram">
+              <a-form-item label="Telegram Bot Token">
+                <a-input-password v-model="openclawForm.telegramBotToken" placeholder="留空并保存可清除" allow-clear>
+                  <template #suffix>
+                    <a-tooltip :content="CHAT_TOOLTIP_TELEGRAM" position="left">
+                      <span class="config-suffix-hint">说明</span>
+                    </a-tooltip>
+                  </template>
+                </a-input-password>
+              </a-form-item>
+            </a-collapse-item>
+            <a-collapse-item key="slack" header="Slack">
+              <a-form-item label="Slack Bot Token">
+                <a-input-password v-model="openclawForm.slackBotToken" placeholder="留空并保存可清除" allow-clear>
+                  <template #suffix>
+                    <a-tooltip :content="CHAT_TOOLTIP_SLACK_BOT" position="left">
+                      <span class="config-suffix-hint">说明</span>
+                    </a-tooltip>
+                  </template>
+                </a-input-password>
+              </a-form-item>
+              <a-form-item label="Slack App Token（可选）">
+                <a-input-password v-model="openclawForm.slackAppToken" placeholder="Socket Mode 等；不需要可留空" allow-clear>
+                  <template #suffix>
+                    <a-tooltip :content="CHAT_TOOLTIP_SLACK_APP" position="left">
+                      <span class="config-suffix-hint">说明</span>
+                    </a-tooltip>
+                  </template>
+                </a-input-password>
+              </a-form-item>
+            </a-collapse-item>
+            <a-collapse-item key="feishu" header="飞书">
+              <a-form-item label="飞书 App Secret">
+                <a-input-password v-model="openclawForm.feishuAppSecret" placeholder="留空并保存可清除" allow-clear>
+                  <template #suffix>
+                    <a-tooltip :content="CHAT_TOOLTIP_FEISHU" position="left">
+                      <span class="config-suffix-hint">说明</span>
+                    </a-tooltip>
+                  </template>
+                </a-input-password>
+              </a-form-item>
+            </a-collapse-item>
+            <a-collapse-item key="mattermost" header="Mattermost">
+              <a-form-item label="Mattermost Bot Token">
+                <a-input-password v-model="openclawForm.mattermostBotToken" placeholder="留空并保存可清除" allow-clear>
+                  <template #suffix>
+                    <a-tooltip :content="CHAT_TOOLTIP_MATTERMOST" position="left">
+                      <span class="config-suffix-hint">说明</span>
+                    </a-tooltip>
+                  </template>
+                </a-input-password>
+              </a-form-item>
+            </a-collapse-item>
+          </a-collapse>
+
           <a-form-item>
             <a-space>
               <a-button type="primary" :loading="configSaveLoading" @click="onCompleteConfig">完成配置</a-button>
@@ -1067,7 +1443,7 @@ function onOpenConfig(fromAgent = true) {
         <a-alert
           v-if="settingsWizardCompleted"
           type="normal"
-          message="安装向导仅在首次使用时展示；之后可在此管理全部安装与配置项。"
+          title="安装向导仅在首次使用时展示；之后可在此管理全部安装与配置项。"
           class="settings-hint"
         />
         <a-form layout="vertical" class="settings-form">
@@ -1132,6 +1508,49 @@ function onOpenConfig(fromAgent = true) {
               </a-button>
             </a-space>
             <a-typography-text type="secondary" class="form-hint">检查默认模型、Ollama、网关；「验证请求链」先直连 Ollama 再请求网关，可判断请求是否到达 Ollama（各约 15s/25s 超时）。若对话超时：在终端运行 openclaw gateway --verbose 后重试，日志出现 "embedded run agent start" 且无报错即表示请求已到网关并已交模型侧，多半是首 token 较慢，可改用流式对话或等待约 90 秒。</a-typography-text>
+          </a-form-item>
+          <a-form-item label="GUI 审计日志（最近 60 条）">
+            <a-space wrap>
+              <a-button size="small" type="outline" :loading="settingsGuiAuditLoading" @click="loadGuiAuditLogs">刷新</a-button>
+              <a-select v-model="settingsGuiAuditStatusFilter" size="small" style="width: 140px">
+                <a-option value="all">状态：全部</a-option>
+                <a-option value="blocked">状态：仅阻断</a-option>
+                <a-option value="executing">状态：仅执行中</a-option>
+              </a-select>
+              <a-select v-model="settingsGuiAuditRiskFilter" size="small" style="width: 140px">
+                <a-option value="all">风险：全部</a-option>
+                <a-option value="high">风险：高</a-option>
+                <a-option value="medium">风险：中</a-option>
+                <a-option value="low">风险：低</a-option>
+              </a-select>
+              <a-button size="small" type="primary" @click="exportGuiAuditLogs">导出当前筛选</a-button>
+              <a-typography-text type="secondary">来源：~/.openclaw/logs/gui-actions.jsonl</a-typography-text>
+            </a-space>
+            <div class="gui-audit-table-wrap" v-if="settingsGuiAuditFiltered.length">
+              <table class="gui-audit-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>状态</th>
+                    <th>风险</th>
+                    <th>原因</th>
+                    <th>目标应用</th>
+                    <th>消息摘要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, idx) in settingsGuiAuditFiltered" :key="`${row.ts}-${idx}`">
+                    <td>{{ row.ts }}</td>
+                    <td>{{ row.status }}</td>
+                    <td>{{ row.risk }}</td>
+                    <td>{{ row.reason }}</td>
+                    <td>{{ row.requestedApp || '-' }}</td>
+                    <td>{{ row.message }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <a-typography-text v-else type="secondary" class="form-hint">暂无 GUI 审计记录。</a-typography-text>
           </a-form-item>
           <a-divider orientation="left">环境</a-divider>
           <a-form-item label="Node 环境地址">

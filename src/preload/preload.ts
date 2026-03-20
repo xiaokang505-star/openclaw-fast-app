@@ -9,7 +9,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('detection-progress', handler);
   },
   getSettings: () => ipcRenderer.invoke('get-settings'),
-  setSettings: (s: { nodePath?: string; npmRegistry?: string; nvmNodeMirror?: string; nvmDefaultVersion?: string; wizardCompleted?: boolean; openclawPackageVersion?: string; ollamaChatModel?: string; chatBackend?: 'ollama' | 'openclaw'; gatewayChatTimeoutSec?: number }) => ipcRenderer.invoke('set-settings', s),
+  setSettings: (s: {
+    nodePath?: string;
+    npmRegistry?: string;
+    nvmNodeMirror?: string;
+    nvmDefaultVersion?: string;
+    wizardCompleted?: boolean;
+    openclawPackageVersion?: string;
+    ollamaChatModel?: string;
+    chatBackend?: 'ollama' | 'openclaw';
+    gatewayChatTimeoutSec?: number;
+    guiEnabled?: boolean;
+    guiAllowApps?: string;
+    guiRequireConfirmForDangerous?: boolean;
+  }) => ipcRenderer.invoke('set-settings', s),
   getNodeDownloadUrl: () => ipcRenderer.invoke('get-node-download-url'),
   nvmIsInstalled: () => ipcRenderer.invoke('nvm-is-installed'),
   nvmInstall: () => ipcRenderer.invoke('nvm-install'),
@@ -26,11 +39,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   openConfigDir: () => ipcRenderer.invoke('open-config-dir'),
   getOpenClawConfig: () => ipcRenderer.invoke('get-openclaw-config'),
-  setOpenClawConfig: (form: { modelSource?: string; apiKey?: string; defaultModel?: string; gatewayPort?: number; gatewayToken?: string }) => ipcRenderer.invoke('set-openclaw-config', form),
+  setOpenClawConfig: (form: {
+    modelSource?: string;
+    defaultModel?: string;
+    gatewayPort?: number;
+    gatewayToken?: string;
+    openaiApiKey?: string;
+    anthropicApiKey?: string;
+    googleGeminiApiKey?: string;
+    discordEnabled?: boolean;
+    discordBotToken?: string;
+    discordAllowFromUserId?: string;
+    discordGuildId?: string;
+    telegramBotToken?: string;
+    slackBotToken?: string;
+    slackAppToken?: string;
+    feishuAppSecret?: string;
+    mattermostBotToken?: string;
+  }) => ipcRenderer.invoke('set-openclaw-config', form),
   /** 诊断 500 可能原因：默认模型、Ollama 状态、模型是否已拉取 */
   openclawGateway500Diagnostic: () => ipcRenderer.invoke('openclaw-gateway-500-diagnostic') as Promise<{ summary: string; details: string[] }>,
   testGatewayV1Models: () => ipcRenderer.invoke('test-gateway-v1-models') as Promise<{ success: boolean; status?: number; statusText?: string; modelIds?: string[]; rawBody?: string; error?: string; chatCompletionsCheck?: { ok: boolean; status: number; bodyPreview: string } }>,
   verifyRequestChain: () => ipcRenderer.invoke('verify-request-chain') as Promise<{ ollama: { ok: boolean; ms: number; error?: string }; gateway: { ok: boolean; ms: number; error?: string }; model: string }>,
+  getGuiAuditLogs: (limit?: number) => ipcRenderer.invoke('get-gui-audit-logs', limit) as Promise<Array<{
+    ts: string;
+    status: 'blocked' | 'confirmed' | 'bypassed' | 'executing';
+    reason: string;
+    risk: 'low' | 'medium' | 'high';
+    message: string;
+    allowApps?: string[];
+    requestedApp?: string | null;
+    taskId?: string;
+    stepId?: string;
+    stepAction?: string;
+    stepIndex?: number;
+    stepTotal?: number;
+  }>>,
+  exportGuiAuditLogs: (payload: string) => ipcRenderer.invoke('export-gui-audit-logs', payload) as Promise<{ success: boolean; path?: string; error?: string }>,
   openclawChatSend: (messages: { role: string; content: string }[], stream?: boolean) => ipcRenderer.invoke('openclaw-chat-send', messages, stream),
   /** 对话直连 Ollama；model 可选，不传则用设置中的 ollamaChatModel */
   ollamaChatSend: (messages: { role: string; content: string }[], stream?: boolean, model?: string) => ipcRenderer.invoke('ollama-chat-send', messages, stream, model),

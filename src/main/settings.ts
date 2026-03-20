@@ -50,6 +50,12 @@ export interface AppSettings {
   chatBackend?: 'ollama' | 'openclaw';
   /** 经 OpenClaw 网关对话的超时时间（秒），仅对网关对话生效；默认 90，范围 30～300 */
   gatewayChatTimeoutSec?: number;
+  /** GUI 执行总开关（应用侧策略，不写 openclaw.json） */
+  guiEnabled?: boolean;
+  /** GUI 允许操作应用白名单（逗号分隔字符串） */
+  guiAllowApps?: string;
+  /** 高风险 GUI 操作前二次确认 */
+  guiRequireConfirmForDangerous?: boolean;
 }
 
 export const GATEWAY_CHAT_TIMEOUT_SEC_MIN = 30;
@@ -103,6 +109,9 @@ export async function getSettings(): Promise<AppSettings> {
       gatewayChatTimeoutSec: typeof data.gatewayChatTimeoutSec === 'number' && Number.isFinite(data.gatewayChatTimeoutSec)
         ? Math.min(GATEWAY_CHAT_TIMEOUT_SEC_MAX, Math.max(GATEWAY_CHAT_TIMEOUT_SEC_MIN, Math.round(data.gatewayChatTimeoutSec)))
         : undefined,
+      guiEnabled: data.guiEnabled === true,
+      guiAllowApps: typeof data.guiAllowApps === 'string' ? data.guiAllowApps.trim() || undefined : undefined,
+      guiRequireConfirmForDangerous: data.guiRequireConfirmForDangerous !== false,
     };
   } catch {
     return {};
@@ -128,6 +137,11 @@ export async function setSettings(settings: AppSettings): Promise<void> {
           ? Math.min(GATEWAY_CHAT_TIMEOUT_SEC_MAX, Math.max(GATEWAY_CHAT_TIMEOUT_SEC_MIN, Math.round(settings.gatewayChatTimeoutSec)))
           : undefined)
       : prev.gatewayChatTimeoutSec,
+    guiEnabled: settings.guiEnabled !== undefined ? settings.guiEnabled : prev.guiEnabled,
+    guiAllowApps: settings.guiAllowApps !== undefined ? (settings.guiAllowApps?.trim() || undefined) : prev.guiAllowApps,
+    guiRequireConfirmForDangerous: settings.guiRequireConfirmForDangerous !== undefined
+      ? settings.guiRequireConfirmForDangerous
+      : prev.guiRequireConfirmForDangerous,
   };
   await fs.promises.writeFile(p, JSON.stringify(merged, null, 2), 'utf8');
   if (merged.npmRegistry) {

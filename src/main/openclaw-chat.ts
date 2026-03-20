@@ -22,6 +22,36 @@ function formatFetchError(e: unknown, port: number): string {
   return msg || '请求失败，请确认网关已启动。';
 }
 
+/** 网关 / Ollama 报错含此信息时：嵌入代理仍会走 tools，与客户端 tool_choice 无关 */
+function hintIfOllamaToolsUnsupported(text: string): string {
+  const t = text.toLowerCase();
+  if (!t.includes('does not support tools')) return '';
+  return (
+    ' 若日志为「does not support tools」：OpenClaw 主代理调用 Ollama 时需要模型支持 function calling。' +
+    '请换用例如 llama3.2、llama3.1、qwen2.5 等（终端 `ollama pull llama3.2`），再在设置中「一键应用本地模型」并「停止网关」后重新启动网关。'
+  );
+}
+
+/** 网关日志常见：Message: `user` failed、sessions_send 与编造 sessionKey */
+function hintIfMessagingToolFailed(text: string): string {
+  const compact = text.replace(/\s+/g, ' ');
+  if (
+    !/message:\s*`[^`]+`\s*failed/i.test(compact) &&
+    !compact.toLowerCase().includes('sessions_send')
+  ) {
+    return '';
+  }
+  return (
+    ' 若出现 Message … failed 或 sessions_send：多为消息目标无法解析（如字面量 user）或 sessionKey 无效。应用内 WebChat 与 Discord 会话不同，代理却可能仍走 Discord 工具。请在「OpenClaw 配置」填写真实 Discord 用户 ID/服务器 ID 并重启网关，或明确要求「在本机用终端/脚本执行」而非通过聊天渠道投递。'
+  );
+}
+
+function appendGatewayErrorHints(message: string): string {
+  const parts = [hintIfOllamaToolsUnsupported(message), hintIfMessagingToolFailed(message)].filter(Boolean);
+  if (!parts.length) return '';
+  return `\n${parts.join('\n').trim()}`;
+}
+
 /** 从 openclaw.json 读取网关端口与鉴权 token（用于 Chat Completions） */
 export async function getGatewayChatConfig(): Promise<{
   port: number;
@@ -301,6 +331,11 @@ export async function getOpenClawGateway500Diagnostic(): Promise<{ summary: stri
         details.push('openclaw.json 中缺少 models.providers["ollama-local"]，网关无法解析该模型，请到设置中点击「一键应用本地模型」选择对应模型并应用');
       }
       const modelName = defaultModel.replace(/^ollama-local\/|^ollama\//, '').split(':')[0];
+      if (modelName === 'llama3') {
+        details.push(
+          '默认模型为 llama3（如 llama3:latest）时，Ollama 常报「does not support tools」，因主代理需要 tool 能力。建议改用 llama3.2 或 llama3.1、qwen2.5 等并重新「一键应用本地模型」',
+        );
+      }
       const ollamaRunning = await isOllamaRunning();
       if (!ollamaRunning) {
         details.push('Ollama 未运行，请先启动 Ollama');
@@ -418,6 +453,7 @@ export async function sendChat(
         }
         const diag = await getOpenClawGateway500Diagnostic();
         err = `OpenClaw 网关处理请求时出错(500)。${gatewayMsg}诊断：${diag.summary}。若仍无法解决，请在终端运行 openclaw gateway --port ${port} --allow-unconfigured --verbose 查看网关详细日志。`;
+        err += appendGatewayErrorHints(text + gatewayMsg);
       }
       return { success: false, error: err };
     }
@@ -488,6 +524,7 @@ export async function sendChatStream(
         }
         const diag = await getOpenClawGateway500Diagnostic();
         err = `OpenClaw 网关处理请求时出错(500)。${gatewayMsg}诊断：${diag.summary}。若仍无法解决，请在终端运行 openclaw gateway --port ${port} --allow-unconfigured --verbose 查看网关详细日志。`;
+        err += appendGatewayErrorHints(text + gatewayMsg);
       }
       return { success: false, error: err };
     }
@@ -519,7 +556,9 @@ export async function sendChatStream(
             };
             if (parsed?.error?.message && webContents && !webContents.isDestroyed()) {
               hadAnyDelta = true;
-              webContents.send('chat-stream-delta', `[网关错误] ${String(parsed.error.message)}`);
+              const em = String(parsed.error.message);
+              const extra = appendGatewayErrorHints(em);
+              webContents.send('chat-stream-delta', `[网关错误] ${em}${extra}`);
               continue;
             }
             const choice = parsed?.choices?.[0];
@@ -562,7 +601,7 @@ export async function sendChatStream(
     if (!hadAnyDelta && webContents && !webContents.isDestroyed()) {
       webContents.send(
         'chat-stream-delta',
-        '未收到流式内容。请到设置中确认网关已启动、Ollama 已运行，并「一键应用本地模型」后重启网关；若仍无效，终端运行：openclaw gateway --port 18789 --allow-unconfigured --verbose 查看报错。'
+        '未收到流式回复正文。若网关已启动且模型正常，常见情况是：代理本轮只执行了工具（如 message / sessions_send）且报错或未把说明写回对话——请用 `openclaw gateway --verbose` 查看 tools 日志（例如 Message: `user` failed 表示消息目标无效；编造 sessionKey 时 WebChat 与 Discord 会话不一致）。请在配置页填写真实 Discord 用户 ID，或明确要求「在本机用终端执行 open -a Finder」等。'
       );
     }
     if (webContents && !webContents.isDestroyed()) webContents.send('chat-stream-done', {});
