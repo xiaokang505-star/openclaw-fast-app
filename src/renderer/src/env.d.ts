@@ -78,11 +78,27 @@ export interface GuiAuditLogEntry {
   stepTotal?: number;
 }
 
+export interface LocalUserContext {
+  username: string;
+  realName?: string;
+  homeDir: string;
+  hostName: string;
+  platform: string;
+  arch: string;
+  locale: string;
+  timezone: string;
+}
+
 declare global {
   interface Window {
     electronAPI: {
       getPlatformInfo: () => Promise<{ platform: string; arch: string }>;
+      getLocalUserContext: () => Promise<LocalUserContext>;
       runDetection: () => Promise<DetectionReport>;
+      windowMinimize: () => Promise<void>;
+      windowMaximizeToggle: () => Promise<boolean>;
+      windowIsMaximized: () => Promise<boolean>;
+      windowClose: () => Promise<void>;
       onDetectionProgress: (callback: (data: { step: string; message: string }) => void) => () => void;
       getSettings: () => Promise<AppSettings>;
       setSettings: (s: AppSettings) => Promise<void>;

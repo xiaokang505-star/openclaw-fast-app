@@ -16,15 +16,87 @@ body {
 
 .app {
   min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   max-width: 800px;
   margin: 0 auto;
-  padding: 20px 24px;
+  padding: 8px 24px 20px;
   background: var(--color-bg-1, #fff);
   box-shadow: 0 1px 8px rgba(0, 0, 0, 0.06);
   border-radius: 12px;
 }
+
+.app.app--wide {
+  max-width: 1040px;
+}
+
+
+.window-titlebar {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  -webkit-app-region: drag;
+  user-select: none;
+  margin: -8px -12px 10px;
+  padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--color-border-2, #e5e6eb);
+  background: var(--color-fill-1, #f7f8fa);
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.window-titlebar__drag-region {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.window-titlebar__title {
+  font-size: 12px;
+  color: var(--color-text-2, #4e5969);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.window-titlebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.window-titlebar__btn {
+  width: 28px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-2, #4e5969);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.window-titlebar__btn:hover {
+  background: var(--color-fill-3, #e5e6eb);
+}
+
+.window-titlebar__btn--danger:hover {
+  background: #e3413f;
+  color: #fff;
+}
+
+.window-titlebar__symbol {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
 
 .header {
   position: relative;
@@ -36,6 +108,26 @@ body {
   padding-bottom: 16px;
   margin-bottom: 4px;
   border-bottom: 1px solid var(--color-border-2, #e5e6eb);
+}
+
+.header--ollama {
+  align-items: flex-start;
+}
+
+.header-brand {
+  flex: 1;
+  min-width: 0;
+}
+
+.header-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.header-settings-btn {
+  color: var(--color-text-2, #4e5969) !important;
 }
 
 .header-actions {
@@ -51,18 +143,90 @@ body {
   font-size: 0.9rem;
 }
 
-.btn-settings {
-  position: absolute !important;
-  top: 0;
-  right: 0;
-}
-
 .main {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 24px 0;
+  overflow: hidden;
+}
+
+/* 设置页：侧栏 + 可滚动内容（偏 Ollama 桌面端信息架构） */
+.settings-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  margin: 0 -8px;
+  border: 1px solid var(--color-border-2, #e5e6eb);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-bg-2, #fafbfc);
+}
+
+.settings-nav {
+  width: 200px;
+  flex-shrink: 0;
+  padding: 12px 0;
+  background: var(--color-fill-1, #f7f8fa);
+  border-right: 1px solid var(--color-border-2, #e5e6eb);
+}
+
+.settings-nav-item {
+  padding: 10px 16px;
+  font-size: 14px;
+  color: var(--color-text-2, #4e5969);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.settings-nav-item:hover {
+  background: var(--color-fill-2, #f2f3f5);
+  color: var(--color-text-1, #1d2129);
+}
+
+.settings-nav-item--active {
+  background: var(--color-bg-1, #fff);
+  color: rgb(var(--primary-6));
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 rgb(var(--primary-6));
+}
+
+.settings-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-1, #fff);
+}
+
+.settings-panel-scroll {
+  flex: 1;
+  min-height: 280px;
+  max-height: min(72vh, 720px);
+  overflow: auto;
+  padding: 20px 24px 28px;
+}
+
+.settings-panel-title {
+  margin: 0 0 16px 0 !important;
+}
+
+.settings-form--panel {
+  max-width: 680px;
+}
+
+.settings-panel .config-form-wide {
+  max-width: 680px;
+}
+
+.settings-panel .config-collapse {
+  margin-bottom: 8px;
+}
+
+.settings-panel .config-collapse .arco-collapse-item-content {
+  background: transparent;
 }
 
 .hero-card,
@@ -252,6 +416,7 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .agent-messages {
@@ -273,6 +438,10 @@ body {
   padding: 12px 0;
   border-top: 1px solid var(--color-border-2, #e5e6eb);
   background: var(--color-bg-1, #fff);
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  z-index: 2;
 }
 
 .agent-input {

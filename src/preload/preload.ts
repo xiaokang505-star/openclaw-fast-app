@@ -2,7 +2,21 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getPlatformInfo: () => ipcRenderer.invoke('get-platform-info'),
+  getLocalUserContext: () => ipcRenderer.invoke('get-local-user-context') as Promise<{
+    username: string;
+    realName?: string;
+    homeDir: string;
+    hostName: string;
+    platform: string;
+    arch: string;
+    locale: string;
+    timezone: string;
+  }>,
   runDetection: () => ipcRenderer.invoke('run-detection'),
+  windowMinimize: () => ipcRenderer.invoke('window-minimize') as Promise<void>,
+  windowMaximizeToggle: () => ipcRenderer.invoke('window-maximize-toggle') as Promise<boolean>,
+  windowIsMaximized: () => ipcRenderer.invoke('window-is-maximized') as Promise<boolean>,
+  windowClose: () => ipcRenderer.invoke('window-close') as Promise<void>,
   onDetectionProgress: (callback: (data: { step: string; message: string }) => void) => {
     const handler = (_: unknown, data: { step: string; message: string }) => callback(data);
     ipcRenderer.on('detection-progress', handler);

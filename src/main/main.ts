@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, type MessageBoxOptions } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, type MessageBoxOptions, type BrowserWindowConstructorOptions } from 'electron';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -35,6 +35,7 @@ import {
   SUGGESTED_NODE_VERSIONS,
 } from './nvm';
 import { getSettings, setSettings, getPathEnvAsync, getGatewayChatTimeoutMs, NPM_REGISTRY_PRESETS, NVM_NODE_MIRROR_PRESETS } from './settings';
+import { buildLocalUserContextPrompt, getLocalUserContext } from './user-context';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -193,8 +194,70 @@ function buildGuiPolicySystemPrompt(allowAppsCsv: string | undefined): string {
   ].join('\n');
 }
 
+function isMessagingIntent(text: string): boolean {
+  const t = text.toLowerCase();
+  const zh = /(发消息|发送消息|通知|私信|回消息|给.*发|发给|转告)/;
+  const en = /\b(message|send message|dm|notify|reply to|text)\b/;
+  return zh.test(text) || en.test(t);
+}
+
+function hasExplicitMessageTarget(text: string): boolean {
+  const t = text.toLowerCase();
+  if (hasPlaceholderMessageTarget(text)) return false;
+  // 常见目标表达：@xxx、给某人、to xxx、user id 等
+  if (/@[a-z0-9._-]{2,}/i.test(text)) return true;
+  if (/(给|发给|通知)\s*[A-Za-z0-9\u4e00-\u9fa5._-]{2,}/.test(text)) return true;
+  if (/\bto\s+[a-z0-9._-]{2,}\b/i.test(t)) return true;
+  if (/\b(user\s*id|uid|discord\s*id|session)\b/i.test(t)) return true;
+  return false;
+}
+
+function hasPlaceholderMessageTarget(text: string): boolean {
+  const t = text.toLowerCase();
+  return (
+    /@username\b/i.test(text) ||
+    /your[_ -]?user[_ -]?id/i.test(t) ||
+    /\bplaceholder\b/i.test(t) ||
+    /replace with/i.test(t)
+  );
+}
+
+function buildMessagingGuardSystemPrompt(): string {
+  return [
+    '当你计划调用消息投递工具（message / sessions_send）时，必须先确认真实目标。',
+    '若用户未提供可识别 target（如 @用户名、用户ID、会话ID），禁止调用工具。',
+    '缺少目标时先追问：请提供要发送给谁（用户名/ID/会话）。',
+    '严禁使用占位符（如 @username、your_user_id）发起调用。',
+  ].join('\n');
+}
+
+function isTtsIntent(text: string): boolean {
+  const t = text.toLowerCase();
+  const zh = /(朗读|读出来|语音播报|说出来|播报一下|tts|文本转语音)/;
+  const en = /\b(tts|text to speech|read aloud|speak|voice)\b/;
+  return zh.test(text) || en.test(t);
+}
+
+function hasExplicitTtsContent(text: string): boolean {
+  const t = text.toLowerCase();
+  // 常见表达：朗读“xxx” / 读一下 xxx / read aloud "xxx"
+  if (/[“"][^”"]{1,}[”"]/.test(text)) return true;
+  if (/(朗读|读|播报|说)\s*(这句|这段|以下|一下)?\s*[：:]\s*\S+/.test(text)) return true;
+  if (/\bread aloud\b[\s:]+.+/i.test(t)) return true;
+  if (/\btts\b[\s:]+.+/i.test(t)) return true;
+  return false;
+}
+
+function buildTtsGuardSystemPrompt(): string {
+  return [
+    '当你计划调用 tts 工具时，必须提供非空 text 参数。',
+    '若用户未给出要朗读的具体文本，先追问“请提供要朗读的文本内容”。',
+    '禁止调用空 text 或仅占位文本的 tts 请求。',
+  ].join('\n');
+}
+
 function createWindow(): void {
-  mainWindow = new BrowserWindow({
+  const windowOptions: BrowserWindowConstructorOptions = {
     width: 900,
     height: 700,
     minWidth: 700,
@@ -206,11 +269,25 @@ function createWindow(): void {
     },
     title: 'OpenClaw 安装助手',
     show: false,
-  });
+    frame: false,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: false,
+    autoHideMenuBar: true,
+  };
+
+  // macOS 上再做一次保险：把系统红绿灯控件移出可视区域
+  if (process.platform === 'darwin') {
+    windowOptions.trafficLightPosition = { x: -100, y: -100 };
+  }
+
+  mainWindow = new BrowserWindow(windowOptions);
 
   // Vue 构建产物在 dist/renderer（生产）；开发时需先 npm run build:renderer
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => {
+    console.log('[window] frameless=%s titleBarStyle=%s', String(windowOptions.frame === false), String(windowOptions.titleBarStyle));
+    mainWindow?.show();
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -231,6 +308,30 @@ ipcMain.handle('get-platform-info', () => ({
   platform: process.platform,
   arch: process.arch,
 }));
+ipcMain.handle('get-local-user-context', () => getLocalUserContext());
+
+
+ipcMain.handle('window-minimize', () => {
+  mainWindow?.minimize();
+});
+
+ipcMain.handle('window-maximize-toggle', () => {
+  if (!mainWindow) return false;
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+    return false;
+  }
+  mainWindow.maximize();
+  return true;
+});
+
+ipcMain.handle('window-is-maximized', () => {
+  return mainWindow?.isMaximized() ?? false;
+});
+
+ipcMain.handle('window-close', () => {
+  mainWindow?.close();
+});
 
 ipcMain.handle('run-detection', async () => {
   const settings = await getSettings();
@@ -320,6 +421,24 @@ ipcMain.handle('chat-send', async (_: unknown, messages: { role: string; content
   const list = messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }));
   const gatewayTimeoutMs = getGatewayChatTimeoutMs(settings);
   const lastUser = [...list].reverse().find((m) => m.role === 'user');
+  if (lastUser && isTtsIntent(lastUser.content) && !hasExplicitTtsContent(lastUser.content)) {
+    return {
+      success: false as const,
+      error: '检测到语音播报（TTS）请求，但未提供要朗读的文本。请补充具体内容后再试。',
+    };
+  }
+  if (lastUser && hasPlaceholderMessageTarget(lastUser.content)) {
+    return {
+      success: false as const,
+      error: '检测到占位目标（如 @username / your_user_id）。请提供真实接收方（@用户名、用户ID 或会话ID），不要使用占位符。',
+    };
+  }
+  if (lastUser && isMessagingIntent(lastUser.content) && !hasExplicitMessageTarget(lastUser.content)) {
+    return {
+      success: false as const,
+      error: '检测到“发送消息”请求，但未提供明确目标。请补充接收方（如 @用户名、用户ID 或会话ID）后再试。',
+    };
+  }
   const guiIntent = lastUser ? isGuiIntent(lastUser.content) : false;
   const raw = await readOpenClawConfig();
   const form = getFormConfigFromRaw(raw);
@@ -338,6 +457,13 @@ ipcMain.handle('chat-send', async (_: unknown, messages: { role: string; content
   const listWithGuiPolicy = guiIntent
     ? [{ role: 'system' as const, content: buildGuiPolicySystemPrompt(settings.guiAllowApps) }, ...list]
     : list;
+  const listWithPolicy = lastUser && isMessagingIntent(lastUser.content)
+    ? [{ role: 'system' as const, content: buildMessagingGuardSystemPrompt() }, ...listWithGuiPolicy]
+    : listWithGuiPolicy;
+  const listWithTtsGuard = lastUser && isTtsIntent(lastUser.content)
+    ? [{ role: 'system' as const, content: buildTtsGuardSystemPrompt() }, ...listWithPolicy]
+    : listWithPolicy;
+  const listWithUserContext = [{ role: 'system' as const, content: buildLocalUserContextPrompt(getLocalUserContext()) }, ...listWithTtsGuard];
 
   if (guiIntent && !guiEnabled) {
     await appendGuiAudit({
@@ -528,10 +654,10 @@ ipcMain.handle('chat-send', async (_: unknown, messages: { role: string; content
     return sendOllamaChat(list, useModel);
   }
   if (stream) {
-    const r = await sendChatStream(mainWindow?.webContents ?? null, listWithGuiPolicy, { model: 'openclaw' });
+      const r = await sendChatStream(mainWindow?.webContents ?? null, listWithUserContext, { model: 'openclaw' });
     return guiIntent ? { ...r, executionReceipt: makeReceipt('executing', guiRisk === 'high' ? 'user_confirmed_high_risk' : (guiRisk === 'medium' ? 'gui_medium_risk_auto' : 'gui_low_risk_auto')) } : r;
   }
-  const r = await sendChat(listWithGuiPolicy, { model: 'openclaw', timeoutMs: gatewayTimeoutMs });
+    const r = await sendChat(listWithUserContext, { model: 'openclaw', timeoutMs: gatewayTimeoutMs });
   return guiIntent ? { ...r, executionReceipt: makeReceipt('executing', guiRisk === 'high' ? 'user_confirmed_high_risk' : (guiRisk === 'medium' ? 'gui_medium_risk_auto' : 'gui_low_risk_auto')) } : r;
 });
 
