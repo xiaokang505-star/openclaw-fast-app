@@ -37,12 +37,16 @@ const APP_ALIASES: Record<string, string[]> = {
   wechat: ['WeChat', '微信'],
   百度网盘: ['百度网盘', 'BaiduNetdisk'],
   百度云盘: ['百度网盘', 'BaiduNetdisk'],
+  /** Finder.app 在 CoreServices，不在 /Applications；须能被枚举或走别名 */
   finder: ['Finder'],
+  Finder: ['Finder'],
+  访达: ['Finder'],
   浏览器: ['Google Chrome', 'Safari', 'Microsoft Edge'],
 };
 
 async function listInstalledApps(): Promise<Array<{ name: string; fullPath: string }>> {
-  const roots = ['/Applications', '/System/Applications'];
+  /** CoreServices：Finder、Dock 等系统壳层应用，不在 /Applications */
+  const roots = ['/Applications', '/System/Applications', '/System/Library/CoreServices'];
   const out: Array<{ name: string; fullPath: string }> = [];
   for (const root of roots) {
     let entries: fs.Dirent[] = [];

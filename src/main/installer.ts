@@ -116,7 +116,8 @@ export async function installDaemonHandler(): Promise<{
   });
 }
 
-const GATEWAY_START_WAIT_MS = 25000;
+/** 冷启动或首次拉模型时网关可能较慢；过短易误报「未响应」 */
+const GATEWAY_START_WAIT_MS = 90_000;
 
 /** OpenClaw 网关运行时要求 Node >=22.16（与 CLI 入口的 22.12 校验可能不一致） */
 function gatewayLogHint(tail: string): string {
@@ -189,13 +190,18 @@ export async function startGatewayInProcessHandler(): Promise<{
   let gatewayStdout = '';
   let gatewayExited = false;
   let gatewayExitCode: number | null = null;
+  /** spawn 失败（如 ENOENT）时仅有 error 事件，不会走 exit；勿吞掉否则会一直等到超时。用 ref 避免 TS 在 while 内误判 let 始终为 null（回调赋值不参与控制流分析）。 */
+  const gatewaySpawnFail = { current: null as { message: string; code?: string } | null };
   gatewayChild.stdout?.on('data', (chunk: Buffer | string) => {
     gatewayStdout += chunk.toString();
   });
   gatewayChild.stderr?.on('data', (chunk: Buffer | string) => {
     gatewayStderr += chunk.toString();
   });
-  gatewayChild.on('error', () => {});
+  gatewayChild.on('error', (err: NodeJS.ErrnoException) => {
+    gatewaySpawnFail.current = { message: err.message, code: err.code };
+    gatewayChild = null;
+  });
   gatewayChild.on('exit', (code) => {
     gatewayExited = true;
     gatewayExitCode = code;
@@ -204,8 +210,21 @@ export async function startGatewayInProcessHandler(): Promise<{
   gatewayChild.unref();
 
   const deadline = Date.now() + GATEWAY_START_WAIT_MS;
+  let pollTicks = 0;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500));
+    pollTicks += 1;
+    const spawnErr = gatewaySpawnFail.current;
+    if (spawnErr) {
+      const hint =
+        spawnErr.code === 'ENOENT'
+          ? '\n\n未找到 openclaw 命令。请：(1) 终端执行 `npm install -g openclaw`；(2) 在应用「设置」中填写本机 Node 可执行文件路径并保存——从访达启动时默认 PATH 往往不含 npm 全局目录，会导致子进程找不到 CLI。可用终端 `which openclaw` 确认安装位置。'
+          : '';
+      return {
+        success: false,
+        error: `无法启动网关进程：${spawnErr.message}。${hint}`,
+      };
+    }
     if (gatewayExited && gatewayExitCode !== 0) {
       const tail = gatewayStderr.trim() || gatewayStdout.trim();
       const logSnippet = tail ? `\n\n网关进程输出（最后 600 字）：\n${tail.slice(-600)}` : '';
@@ -216,8 +235,13 @@ export async function startGatewayInProcessHandler(): Promise<{
       };
     }
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) }).catch(() => null);
-      if (res !== null && res.ok) return { success: true };
+      // 任意 HTTP 响应（含 404）均表示端口已有服务在监听；OpenClaw 对 GET / 可能非 2xx，勿用 res.ok 误判
+      const res = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+      if (res !== null) return { success: true };
+      // 部分版本根路径较晚就绪，但 /v1/models 或 chat/completions 已可用——用与对话一致的探测避免误报超时
+      if (pollTicks % 4 === 0 && (await isCurrentPortServingGateway())) {
+        return { success: true };
+      }
     } catch {
       // retry
     }
