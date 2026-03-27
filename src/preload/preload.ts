@@ -37,6 +37,40 @@ contextBridge.exposeInMainWorld('electronAPI', {
     guiAllowApps?: string;
     guiRequireConfirmForDangerous?: boolean;
   }) => ipcRenderer.invoke('set-settings', s),
+  getLlvOllamaConfig: () => ipcRenderer.invoke('get-llv-ollama-config') as Promise<{
+    enabled: boolean;
+    listenHost: string;
+    listenPort: number;
+    strategy: 'round_robin' | 'least_inflight' | 'weighted';
+    stickyByModel: boolean;
+    aggregateModels: boolean;
+    healthIntervalSec: number;
+    healthTimeoutMs: number;
+    healthFailThreshold: number;
+    targets: Array<{ id: string; baseUrl: string; weight: number; enabled: boolean; apiKey?: string }>;
+  }>,
+  setLlvOllamaConfig: (cfg: {
+    enabled?: boolean;
+    listenHost?: string;
+    listenPort?: number;
+    strategy?: 'round_robin' | 'least_inflight' | 'weighted';
+    stickyByModel?: boolean;
+    aggregateModels?: boolean;
+    healthIntervalSec?: number;
+    healthTimeoutMs?: number;
+    healthFailThreshold?: number;
+    targets?: Array<{ id: string; baseUrl: string; weight: number; enabled: boolean; apiKey?: string }>;
+  }) => ipcRenderer.invoke('set-llv-ollama-config', cfg),
+  probeLlvOllamaTarget: (baseUrl: string, apiKey?: string) =>
+    ipcRenderer.invoke('probe-llv-ollama-target', baseUrl, apiKey) as Promise<{ ok: boolean; status?: number; error?: string }>,
+  getLlvOllamaProcessStatus: () =>
+    ipcRenderer.invoke('get-llv-ollama-process-status') as Promise<{ running: boolean; pid?: number; lastError?: string }>,
+  startLlvOllamaProcess: () =>
+    ipcRenderer.invoke('start-llv-ollama-process') as Promise<{ success: boolean; error?: string; alreadyRunning?: boolean }>,
+  stopLlvOllamaProcess: () =>
+    ipcRenderer.invoke('stop-llv-ollama-process') as Promise<{ success: boolean }>,
+  applyLlvProviderToOpenClaw: (baseUrl: string) =>
+    ipcRenderer.invoke('apply-llv-provider-to-openclaw', baseUrl) as Promise<{ success: boolean; error?: string }>,
   getNodeDownloadUrl: () => ipcRenderer.invoke('get-node-download-url'),
   nvmIsInstalled: () => ipcRenderer.invoke('nvm-is-installed'),
   nvmInstall: () => ipcRenderer.invoke('nvm-install'),
@@ -117,7 +151,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('ollama-serve-progress', handler);
   },
   installOpenClaw: () => ipcRenderer.invoke('install-openclaw'),
-  installDaemon: () => ipcRenderer.invoke('install-daemon'),
   startGatewayInProcess: () => ipcRenderer.invoke('start-gateway-in-process'),
   stopGatewayInProcess: () => ipcRenderer.invoke('stop-gateway-in-process'),
   onInstallOpenClawProgress: (

@@ -95,8 +95,8 @@ export async function installNvm(
   });
 }
 
-/** 可选的 Node 版本列表（LTS + 最新 22） */
-export const SUGGESTED_NODE_VERSIONS = ['22', '20', '18'];
+/** 可选的 Node 版本列表（须满足应用检测 ≥24） */
+export const SUGGESTED_NODE_VERSIONS = ['24'];
 
 /** 通过 nvm 安装指定 Node 版本 */
 export async function nvmInstallVersion(

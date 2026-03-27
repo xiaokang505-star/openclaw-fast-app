@@ -5,6 +5,9 @@
   "main": "dist/main/main.js",
   "author": "",
   "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "build:renderer": "vite build --config src/renderer/vite.config.ts",
     "build": "npm run build:renderer && tsc",
@@ -12,7 +15,8 @@
     "dev": "npm run build:renderer && tsc && electron .",
     "dev:renderer": "vite --config src/renderer/vite.config.ts",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "reset-wizard": "node scripts/reset-install-wizard.js"
   },
   "devDependencies": {
     "@types/dompurify": "^3.0.5",
@@ -56,6 +60,8 @@
     "@arco-design/web-vue": "^2.57.0",
     "dompurify": "^3.3.3",
     "electron-ollama": "^0.1.25",
-    "marked": "^17.0.4"
+    "marked": "^17.0.4",
+    "pinia": "^3.0.4",
+    "vue-router": "^4.6.4"
   }
 }

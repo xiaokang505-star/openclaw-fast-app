@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>技术指标看板</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+      :root {
+        --bg: #0b1220;
+        --panel: #111b2e;
+        --panel-border: #1d2b45;
+        --text: #e6f7ff;
+        --muted: #8aa3bd;
+        --primary: #22d3ee;
+        --danger: #ef4444;
+        --ok: #22c55e;
+        --warn: #f59e0b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 20px;
+        font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: radial-gradient(circle at 20% 10%, #142845 0%, var(--bg) 40%);
+        color: var(--text);
+      }
+
+      .dashboard {
+        max-width: 1400px;
+        margin: 0 auto;
+        display: grid;
+        gap: 16px;
+      }
+
+      .title {
+        font-size: 24px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+      }
+
+      .subtitle {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(180px, 1fr));
+        gap: 12px;
+      }
+
+      .card {
+        background: linear-gradient(180deg, #13223a 0%, var(--panel) 100%);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        padding: 14px;
+      }
+
+      .card-label {
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 10px;
+      }
+
+      .card-value {
+        font-size: 24px;
+        font-weight: 700;
+        color: var(--primary);
+      }
+
+      .card-value-danger {
+        color: var(--danger);
+      }
+
+      .card-note {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .charts {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        padding: 14px;
+      }
+
+      .panel-title {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0 0 12px;
+      }
+
+      .panel canvas {
+        width: 100%;
+        height: 300px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border-radius: 10px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 10px 8px;
+        border-bottom: 1px solid #20304d;
+        font-size: 13px;
+      }
+
+      th {
+        color: var(--muted);
+        font-weight: 500;
+      }
+
+      .tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .tag-ok {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--ok);
+      }
+
+      .tag-danger {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--danger);
+      }
+
+      .error {
+        background: rgba(239, 68, 68, 0.12);
+        border: 1px solid rgba(239, 68, 68, 0.45);
+        color: #fecaca;
+        padding: 12px;
+        border-radius: 10px;
+        font-size: 13px;
+      }
+
+      @media (max-width: 1100px) {
+        .cards {
+          grid-template-columns: repeat(2, minmax(180px, 1fr));
+        }
+        .charts {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="dashboard">
+      <div>
+        <div class="title">技术指标看板</div>
+        <div class="subtitle">深色主题 · 青色主色 · Chart.js</div>
+      </div>
+
+      <section class="panel" style="padding: 10px 14px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button id="pickCsvBtn" type="button">选择 CSV 文件</button>
+          <button id="loadDemoBtn" type="button">加载示例数据</button>
+          <input id="csvFileInput" type="file" accept=".csv,text/csv" style="display:none" />
+          <span id="dataSourceHint" style="color: var(--muted); font-size: 12px;">数据源：自动读取 ./data/技术数据.csv</span>
+        </div>
+      </section>
+
+      <div id="errorBox" class="error" style="display: none"></div>
+
+      <section class="cards">
+        <div class="card">
+          <div class="card-label">本周未解决 Bug 总数</div>
+          <div id="cardOpenBug" class="card-value">--</div>
+          <div id="cardOpenBugNote" class="card-note">P0: --</div>
+        </div>
+        <div class="card">
+          <div class="card-label">系统可用性（近 7 天均值）</div>
+          <div id="cardAvailability" class="card-value">--</div>
+          <div class="card-note">SLA: 99.9%</div>
+        </div>
+        <div class="card">
+          <div class="card-label">本周部署次数</div>
+          <div id="cardDeployCount" class="card-value">--</div>
+          <div class="card-note">按近 7 天累计</div>
+        </div>
+        <div class="card">
+          <div class="card-label">MTTR 平均故障恢复时长</div>
+          <div id="cardMttr" class="card-value">--</div>
+          <div class="card-note">单位：分钟（近 4 周）</div>
+        </div>
+      </section>
+
+      <section class="charts">
+        <div class="panel">
+          <h3 class="panel-title">近 30 天系统可用性趋势</h3>
+          <canvas id="availabilityChart"></canvas>
+        </div>
+        <div class="panel">
+          <h3 class="panel-title">近 14 天 API P95 响应时间趋势</h3>
+          <canvas id="latencyChart"></canvas>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3 class="panel-title">近 4 周每周 Bug 新增 vs 修复</h3>
+        <canvas id="bugWeeklyChart"></canvas>
+      </section>
+
+      <section class="panel">
+        <h3 class="panel-title">近 5 次部署记录</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>版本</th>
+              <th>是否引发故障</th>
+              <th>恢复时长（分钟）</th>
+            </tr>
+          </thead>
+          <tbody id="deployTableBody"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <script>
+      const THEME = {
+        primary: "#22D3EE",
+        danger: "#EF4444",
+        ok: "#22C55E",
+        text: "#E6F7FF",
+        grid: "rgba(138, 163, 189, 0.22)",
+        muted: "#8AA3BD",
+      };
+
+      function showError(message) {
+        const box = document.getElementById("errorBox");
+        box.textContent = message;
+        box.style.display = "block";
+      }
+      function clearError() {
+        const box = document.getElementById("errorBox");
+        box.textContent = "";
+        box.style.display = "none";
+      }
+
+      function parseCsv(text) {
+        const rows = [];
+        let row = [];
+        let cell = "";
+        let inQuotes = false;
+
+        for (let i = 0; i < text.length; i += 1) {
+          const ch = text[i];
+          const next = text[i + 1];
+
+          if (ch === '"') {
+            if (inQuotes && next === '"') {
+              cell += '"';
+              i += 1;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (ch === "," && !inQuotes) {
+            row.push(cell.trim());
+            cell = "";
+          } else if ((ch === "\n" || ch === "\r") && !inQuotes) {
+            if (ch === "\r" && next === "\n") {
+              i += 1;
+            }
+            if (cell.length > 0 || row.length > 0) {
+              row.push(cell.trim());
+              rows.push(row);
+              row = [];
+              cell = "";
+            }
+          } else {
+            cell += ch;
+          }
+        }
+
+        if (cell.length > 0 || row.length > 0) {
+          row.push(cell.trim());
+          rows.push(row);
+        }
+        return rows;
+      }
+
+      function normalizeKey(key) {
+        return key.replace(/\s/g, "").replace(/[（）()]/g, "").toLowerCase();
+      }
+
+      function numberFrom(value, fallback = 0) {
+        if (value === undefined || value === null || value === "") return fallback;
+        const cleaned = String(value).replace(/[,%]/g, "").trim();
+        const n = Number(cleaned);
+        return Number.isFinite(n) ? n : fallback;
+      }
+
+      function parseBugTriple(raw, row, idxMap) {
+        if (raw && /[\/|,]/.test(raw)) {
+          const parts = raw.split(/[\/|,]/).map((v) => numberFrom(v, 0));
+          return { p0: parts[0] || 0, p1: parts[1] || 0, p2: parts[2] || 0 };
+        }
+        return {
+          p0: numberFrom(row[idxMap.p0], 0),
+          p1: numberFrom(row[idxMap.p1], 0),
+          p2: numberFrom(row[idxMap.p2], 0),
+        };
+      }
+
+      function getMonday(date) {
+        const d = new Date(date);
+        d.setHours(0, 0, 0, 0);
+        const day = d.getDay() || 7;
+        d.setDate(d.getDate() - day + 1);
+        return d;
+      }
+
+      function formatDate(date) {
+        const d = new Date(date);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      }
+
+      function formatWeekKey(date) {
+        const monday = getMonday(date);
+        const y = monday.getFullYear();
+        const m = String(monday.getMonth() + 1).padStart(2, "0");
+        const d = String(monday.getDate()).padStart(2, "0");
+        return `${y}-W(${m}-${d})`;
+      }
+
+      function lastN(list, n) {
+        if (list.length <= n) return list.slice();
+        return list.slice(list.length - n);
+      }
+
+      function initChartDefaults() {
+        Chart.defaults.color = THEME.text;
+        Chart.defaults.borderColor = THEME.grid;
+        Chart.defaults.font.family = 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif';
+      }
+
+      function createAvailabilityChart(rows) {
+        const data = lastN(rows, 30);
+        const labels = data.map((r) => r.dateLabel);
+        const values = data.map((r) => r.availability);
+
+        new Chart(document.getElementById("availabilityChart"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "可用性(%)",
+                data: values,
+                borderColor: THEME.primary,
+                backgroundColor: "rgba(34, 211, 238, 0.15)",
+                tension: 0.3,
+                fill: true,
+                pointRadius: 2,
+              },
+              {
+                label: "SLA 99.9%",
+                data: labels.map(() => 99.9),
+                borderColor: THEME.danger,
+                borderDash: [6, 6],
+                borderWidth: 1.5,
+                pointRadius: 0,
+                fill: false,
+              },
+            ],
+          },
+          options: {
+            plugins: { legend: { labels: { color: THEME.text } } },
+            scales: {
+              y: {
+                min: Math.min(99.0, Math.min(...values, 99.9) - 0.05),
+                max: Math.max(100, Math.max(...values, 99.9) + 0.02),
+                ticks: { callback: (v) => `${Number(v).toFixed(2)}%` },
+              },
+            },
+          },
+        });
+      }
+
+      function createLatencyChart(rows) {
+        const data = lastN(rows, 14);
+        const labels = data.map((r) => r.dateLabel);
+        const values = data.map((r) => r.apiP95);
+        const pointColors = values.map((v) => (v > 500 ? THEME.danger : THEME.primary));
+        const pointRadius = values.map((v) => (v > 500 ? 5 : 3));
+
+        new Chart(document.getElementById("latencyChart"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "API P95(ms)",
+                data: values,
+                borderColor: THEME.primary,
+                backgroundColor: "rgba(34, 211, 238, 0.1)",
+                tension: 0.25,
+                pointBackgroundColor: pointColors,
+                pointBorderColor: pointColors,
+                pointRadius,
+                pointHoverRadius: pointRadius.map((v) => v + 1),
+              },
+            ],
+          },
+          options: {
+            plugins: { legend: { labels: { color: THEME.text } } },
+            scales: {
+              y: { ticks: { callback: (v) => `${v} ms` } },
+            },
+          },
+        });
+      }
+
+      function createBugWeeklyChart(rows) {
+        const buckets = {};
+        rows.forEach((r) => {
+          const key = formatWeekKey(r.dateObj);
+          if (!buckets[key]) {
+            buckets[key] = { p0: 0, p1: 0, p2: 0, fixed: 0 };
+          }
+          buckets[key].p0 += r.bugP0;
+          buckets[key].p1 += r.bugP1;
+          buckets[key].p2 += r.bugP2;
+          buckets[key].fixed += r.bugFixed;
+        });
+
+        const labels = Object.keys(buckets).sort();
+        const recentLabels = lastN(labels, 4);
+        const p0 = recentLabels.map((k) => buckets[k].p0);
+        const p1 = recentLabels.map((k) => buckets[k].p1);
+        const p2 = recentLabels.map((k) => buckets[k].p2);
+        const fixed = recentLabels.map((k) => buckets[k].fixed);
+
+        new Chart(document.getElementById("bugWeeklyChart"), {
+          type: "bar",
+          data: {
+            labels: recentLabels,
+            datasets: [
+              { label: "新增 P0", data: p0, backgroundColor: "rgba(239, 68, 68, 0.85)", stack: "new" },
+              { label: "新增 P1", data: p1, backgroundColor: "rgba(245, 158, 11, 0.85)", stack: "new" },
+              { label: "新增 P2", data: p2, backgroundColor: "rgba(34, 211, 238, 0.85)", stack: "new" },
+              {
+                type: "line",
+                label: "修复总数",
+                data: fixed,
+                borderColor: "#a78bfa",
+                backgroundColor: "#a78bfa",
+                yAxisID: "y",
+                tension: 0.25,
+                pointRadius: 3,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { labels: { color: THEME.text } } },
+            scales: {
+              x: { stacked: true },
+              y: { stacked: true, beginAtZero: true },
+            },
+          },
+        });
+      }
+
+      function fillCards(rows) {
+        const weekRows = lastN(rows, 7);
+        const unresolvedTotal = rows.reduce((sum, r) => sum + (r.bugP0 + r.bugP1 + r.bugP2 - r.bugFixed), 0);
+        const unresolvedP0 = rows.reduce((sum, r) => sum + r.bugP0, 0);
+        const weekAvailability = weekRows.reduce((sum, r) => sum + r.availability, 0) / Math.max(weekRows.length, 1);
+        const weekDeploy = weekRows.reduce((sum, r) => sum + r.deployCount, 0);
+        const mttrSource = lastN(rows, 28).filter((r) => r.recoveryMinutes > 0);
+        const mttr =
+          mttrSource.length > 0
+            ? mttrSource.reduce((sum, r) => sum + r.recoveryMinutes, 0) / mttrSource.length
+            : 0;
+
+        const openBugEl = document.getElementById("cardOpenBug");
+        const openBugNoteEl = document.getElementById("cardOpenBugNote");
+        const availabilityEl = document.getElementById("cardAvailability");
+        const deployEl = document.getElementById("cardDeployCount");
+        const mttrEl = document.getElementById("cardMttr");
+
+        openBugEl.textContent = `${Math.max(0, Math.round(unresolvedTotal))}`;
+        openBugNoteEl.textContent = `P0: ${Math.max(0, Math.round(unresolvedP0))}`;
+        if (unresolvedP0 > 0) openBugNoteEl.classList.add("card-value-danger");
+
+        availabilityEl.textContent = `${weekAvailability.toFixed(3)}%`;
+        if (weekAvailability < 99.9) availabilityEl.classList.add("card-value-danger");
+
+        deployEl.textContent = `${Math.round(weekDeploy)}`;
+        mttrEl.textContent = `${mttr.toFixed(1)} 分钟`;
+      }
+
+      function fillDeployTable(rows) {
+        const tbody = document.getElementById("deployTableBody");
+        const deployRows = rows.filter((r) => r.deployCount > 0);
+        const recent5 = lastN(deployRows, 5).reverse();
+
+        if (recent5.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="4" style="color:${THEME.muted};">暂无部署数据</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = recent5
+          .map((r) => {
+            const faulty = r.incidentCount > 0;
+            const badge = faulty
+              ? '<span class="tag tag-danger">是</span>'
+              : '<span class="tag tag-ok">否</span>';
+            return `
+              <tr>
+                <td>${r.dateLabel}</td>
+                <td>${r.version}</td>
+                <td>${badge}</td>
+                <td>${r.recoveryMinutes > 0 ? r.recoveryMinutes : "-"}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      function renderFromCsvText(text) {
+        const rows = parseCsv(text);
+        if (rows.length < 2) {
+          throw new Error("CSV 内容为空或仅有表头。");
+        }
+
+        const headers = rows[0];
+        const normalized = headers.map((h) => normalizeKey(h));
+        const idxMap = {
+          date: normalized.findIndex((k) => k.includes("日期")),
+          bugTriple: normalized.findIndex((k) => k.includes("新增bug数") || k.includes("新增bug")),
+          p0: normalized.findIndex((k) => k === "p0" || k.includes("新增bug数p0")),
+          p1: normalized.findIndex((k) => k === "p1" || k.includes("新增bug数p1")),
+          p2: normalized.findIndex((k) => k === "p2" || k.includes("新增bug数p2")),
+          fixed: normalized.findIndex((k) => k.includes("bug修复数")),
+          availability: normalized.findIndex((k) => k.includes("系统可用性")),
+          api: normalized.findIndex((k) => k.includes("api平均响应时间") || k.includes("apip95响应时间")),
+          deploy: normalized.findIndex((k) => k.includes("部署次数")),
+          incident: normalized.findIndex((k) => k.includes("故障次数")),
+          recovery: normalized.findIndex((k) => k.includes("故障恢复时长")),
+          version: normalized.findIndex((k) => k.includes("版本")),
+        };
+
+        if (idxMap.date < 0) throw new Error("未找到 `日期` 字段。");
+        if (idxMap.fixed < 0) throw new Error("未找到 `Bug修复数` 字段。");
+        if (idxMap.availability < 0) throw new Error("未找到 `系统可用性(%)` 字段。");
+        if (idxMap.api < 0) throw new Error("未找到 `API平均响应时间(ms)` 字段。");
+        if (idxMap.deploy < 0) throw new Error("未找到 `部署次数` 字段。");
+        if (idxMap.incident < 0) throw new Error("未找到 `故障次数` 字段。");
+        if (idxMap.recovery < 0) throw new Error("未找到 `故障恢复时长(分钟)` 字段。");
+
+        const dataset = rows
+          .slice(1)
+          .map((r, i) => {
+            const dateRaw = r[idxMap.date];
+            const dateObj = new Date(dateRaw);
+            const validDate = Number.isFinite(dateObj.getTime()) ? dateObj : new Date();
+
+            const bugTriple = parseBugTriple(r[idxMap.bugTriple], r, idxMap);
+            const version = idxMap.version >= 0 && r[idxMap.version] ? r[idxMap.version] : `v0.0.${i + 1}`;
+
+            return {
+              dateObj: validDate,
+              dateLabel: formatDate(validDate),
+              bugP0: bugTriple.p0,
+              bugP1: bugTriple.p1,
+              bugP2: bugTriple.p2,
+              bugFixed: numberFrom(r[idxMap.fixed], 0),
+              availability: numberFrom(r[idxMap.availability], 0),
+              apiP95: numberFrom(r[idxMap.api], 0),
+              deployCount: numberFrom(r[idxMap.deploy], 0),
+              incidentCount: numberFrom(r[idxMap.incident], 0),
+              recoveryMinutes: numberFrom(r[idxMap.recovery], 0),
+              version,
+            };
+          })
+          .sort((a, b) => a.dateObj - b.dateObj);
+
+        initChartDefaults();
+        fillCards(dataset);
+        createAvailabilityChart(dataset);
+        createBugWeeklyChart(dataset);
+        createLatencyChart(dataset);
+        fillDeployTable(dataset);
+      }
+
+      async function loadAndRender() {
+        clearError();
+        const hint = document.getElementById("dataSourceHint");
+        try {
+          const response = await fetch("./data/技术数据.csv");
+          if (!response.ok) throw new Error(`读取失败，HTTP ${response.status}`);
+          const text = await response.text();
+          renderFromCsvText(text);
+          hint.textContent = "数据源：./data/技术数据.csv";
+          return;
+        } catch {
+          // 尝试绝对路径
+        }
+        try {
+          const response = await fetch("/data/技术数据.csv");
+          if (!response.ok) throw new Error(`读取失败，HTTP ${response.status}`);
+          const text = await response.text();
+          renderFromCsvText(text);
+          hint.textContent = "数据源：/data/技术数据.csv";
+          return;
+        } catch (err) {
+          showError(
+            `自动读取失败：${err.message}。若你是直接双击打开 HTML（file://），请点击上方「选择 CSV 文件」手动导入，或用本地静态服务访问。`
+          );
+        }
+      }
+
+      document.getElementById("pickCsvBtn").addEventListener("click", () => {
+        document.getElementById("csvFileInput").click();
+      });
+      document.getElementById("csvFileInput").addEventListener("change", async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          renderFromCsvText(text);
+          clearError();
+          document.getElementById("dataSourceHint").textContent = `数据源：手动导入 ${file.name}`;
+        } catch (err) {
+          showError(`手动导入失败：${err.message}`);
+        }
+      });
+
+      document.getElementById("loadDemoBtn").addEventListener("click", () => {
+        const demo = `日期,新增Bug数（P0/P1/P2）,Bug修复数,系统可用性(%),API平均响应时间(ms),部署次数,故障次数,故障恢复时长(分钟),版本
+2026-03-21,0/2/4,7,99.94,440,0,0,0,v1.8.8
+2026-03-22,0/1/3,6,99.98,380,0,0,0,v1.8.8
+2026-03-23,0/3/6,7,99.90,500,1,0,0,v1.8.9
+2026-03-24,0/2/5,8,99.93,465,0,0,0,v1.8.9
+2026-03-25,0/1/4,7,99.95,430,0,0,0,v1.8.9
+2026-03-26,0/2/5,8,99.91,485,1,1,19,v1.9.0
+2026-03-27,0/2/4,9,99.94,445,0,0,0,v1.9.0`;
+        try {
+          renderFromCsvText(demo);
+          clearError();
+          document.getElementById("dataSourceHint").textContent = "数据源：页面内置示例数据";
+        } catch (err) {
+          showError(`示例数据加载失败：${err.message}`);
+        }
+      });
+
+      loadAndRender();
+    </script>
+  </body>
+</html>

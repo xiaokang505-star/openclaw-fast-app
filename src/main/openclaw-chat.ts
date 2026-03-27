@@ -14,7 +14,7 @@ function formatFetchError(e: unknown, port: number): string {
   const code = err.cause?.code ?? err.code ?? '';
   const msg = err.message || String(e);
   if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || msg.includes('ECONNREFUSED') || msg.includes('ECONNRESET') || msg.toLowerCase().includes('fetch failed')) {
-    return `无法连接到 OpenClaw 网关（127.0.0.1:${port}）。请先在设置中点击「由本应用启动网关」或确保 Daemon 已启动。`;
+    return `无法连接到 OpenClaw 网关（127.0.0.1:${port}）。请先在设置中点击「由本应用启动网关」，或确认本机网关进程已在运行。`;
   }
   if (code === 'ENOTFOUND' || code === 'ETIMEDOUT' || msg.includes('timeout') || msg.includes('Timeout')) {
     return `连接网关超时或不可达（端口 ${port}）。请确认网关已启动。`;

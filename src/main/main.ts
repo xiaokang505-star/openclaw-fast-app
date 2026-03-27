@@ -7,7 +7,6 @@ import {
   getNodeDownloadUrlHandler,
   openConfigDirHandler,
   installOpenClawHandler,
-  installDaemonHandler,
   startGatewayInProcessHandler,
   stopGatewayInProcessHandler,
   disposeGatewayProcess,
@@ -17,6 +16,7 @@ import {
   writeOpenClawConfig,
   getFormConfigFromRaw,
   ensureOllamaLocalAuthProfile,
+  applyLlvProvider,
   type OpenClawFormConfig,
 } from './openclaw-config';
 import { sendChat, sendChatStream, getOpenClawGateway500Diagnostic, testGatewayV1Models, verifyRequestChain } from './openclaw-chat';
@@ -36,6 +36,14 @@ import {
 } from './nvm';
 import { getSettings, setSettings, getPathEnvAsync, getGatewayChatTimeoutMs, NPM_REGISTRY_PRESETS, NVM_NODE_MIRROR_PRESETS } from './settings';
 import { buildLocalUserContextPrompt, getLocalUserContext } from './user-context';
+import {
+  getLlvOllamaConfig,
+  setLlvOllamaConfig,
+  probeLlvTarget,
+  startLlvOllamaProcess,
+  stopLlvOllamaProcess,
+  getLlvOllamaProcessStatus,
+} from './llv-ollama';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -260,8 +268,12 @@ function createWindow(): void {
   const windowOptions: BrowserWindowConstructorOptions = {
     width: 900,
     height: 700,
-    minWidth: 700,
-    minHeight: 500,
+    minWidth: 900,
+    maxWidth: 900,
+    minHeight: 700,
+    maxHeight: 700,
+    resizable: false,
+    maximizable: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
@@ -340,6 +352,17 @@ ipcMain.handle('run-detection', async () => {
 
 ipcMain.handle('get-settings', () => getSettings());
 ipcMain.handle('set-settings', (_: unknown, s: Parameters<typeof setSettings>[0]) => setSettings(s));
+ipcMain.handle('get-llv-ollama-config', () => getLlvOllamaConfig());
+ipcMain.handle('set-llv-ollama-config', (_: unknown, cfg: Parameters<typeof setLlvOllamaConfig>[0]) => setLlvOllamaConfig(cfg));
+ipcMain.handle('probe-llv-ollama-target', (_: unknown, baseUrl: string, apiKey?: string) => probeLlvTarget(baseUrl, apiKey));
+ipcMain.handle('get-llv-ollama-process-status', () => getLlvOllamaProcessStatus());
+ipcMain.handle('start-llv-ollama-process', async () => {
+  const settings = await getSettings();
+  const pathEnv = await getPathEnvAsync(settings);
+  return startLlvOllamaProcess(pathEnv);
+});
+ipcMain.handle('stop-llv-ollama-process', () => stopLlvOllamaProcess());
+ipcMain.handle('apply-llv-provider-to-openclaw', async (_: unknown, baseUrl: string) => applyLlvProvider(baseUrl));
 
 ipcMain.handle('nvm-is-installed', () => isNvmInstalled());
 ipcMain.handle('nvm-install', () => installNvm(mainWindow?.webContents ?? null));
@@ -359,7 +382,6 @@ ipcMain.handle('open-config-dir', () => openConfigDirHandler());
 ipcMain.handle('install-openclaw', () =>
   installOpenClawHandler(mainWindow?.webContents ?? null)
 );
-ipcMain.handle('install-daemon', () => installDaemonHandler());
 ipcMain.handle('start-gateway-in-process', () => startGatewayInProcessHandler());
 ipcMain.handle('stop-gateway-in-process', () => stopGatewayInProcessHandler());
 

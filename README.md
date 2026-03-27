@@ -4,15 +4,15 @@
 
 ## 功能概览
 
-- **安装引导模式**：按步骤检测环境（Node、npm、OpenClaw、Daemon、配置），引导用户完成安装与配置。
+- **安装引导模式**：按步骤检测环境（Node、npm、OpenClaw、网关、配置），引导用户完成安装与配置。
 - **必备设置菜单**：配置 Node 环境地址、npm 源地址、OpenClaw 包等，支持环境恢复与自定义。
 - **免费本地模型（规划中）**：通过 electron-ollama 与 Ollama 适配器，支持纯本地、零成本的 OpenClaw 使用方式。
 
-详见 [doc/00-项目分析与规划.md](doc/00-项目分析与规划.md) 与 [doc/01-执行方案.md](doc/01-执行方案.md)。
+详见 [doc/00-项目分析与规划.md](doc/00-项目分析与规划.md) 与 [doc/01-执行方案.md](doc/01-执行方案.md)。**多 Ollama 算力分布（规划）**：[doc/03-llv-ollama-算力分布方案.md](doc/03-llv-ollama-算力分布方案.md)。
 
 ## 环境要求
 
-- Node.js 18+
+- Node.js 24+
 - npm 或 pnpm
 
 ## 开发

@@ -507,6 +507,59 @@ export async function ensureOllamaLocalAuthProfile(): Promise<void> {
   await fs.promises.writeFile(authPath, JSON.stringify(data, null, 2), 'utf8');
 }
 
+async function ensureProviderApiKeyProfile(provider: string, key: string): Promise<void> {
+  const authPath = getAuthProfilesPath();
+  const dir = path.dirname(authPath);
+  await fs.promises.mkdir(dir, { recursive: true });
+  const profileId = `${provider}:default`;
+  const newProfile = { type: 'api_key', provider, key };
+  let data: { profiles?: Record<string, unknown>; order?: string[] } = { profiles: {}, order: [] };
+  try {
+    const raw = await fs.promises.readFile(authPath, 'utf8');
+    const parsed = parseJsonLenient(raw) as { profiles?: Record<string, unknown>; order?: string[] } | null;
+    if (parsed && typeof parsed.profiles === 'object') {
+      data.profiles = { ...parsed.profiles };
+      data.order = Array.isArray(parsed.order) ? [...parsed.order] : [];
+    }
+  } catch {
+    // ignore
+  }
+  if (!data.profiles) data.profiles = {};
+  data.profiles[profileId] = newProfile;
+  if (!data.order!.includes(profileId)) data.order!.unshift(profileId);
+  await fs.promises.writeFile(authPath, JSON.stringify(data, null, 2), 'utf8');
+}
+
+/** 一键将 OpenClaw provider 指向 llv-ollama 聚合入口 */
+export async function applyLlvProvider(baseUrl: string): Promise<{ success: boolean; error?: string }> {
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
+  if (!normalizedBaseUrl) return { success: false, error: 'llv baseUrl 不能为空' };
+  const finalBaseUrl = normalizedBaseUrl.endsWith('/v1') ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;
+  const current = await readOpenClawConfig();
+  const base = current && typeof current === 'object' ? { ...current } : {};
+  const models = (base.models && typeof base.models === 'object' ? { ...(base.models as object) } : {}) as Record<string, unknown>;
+  const providers = (models.providers && typeof models.providers === 'object' ? { ...(models.providers as object) } : {}) as Record<string, unknown>;
+  const prev = providers['ollama-lv'];
+  const next =
+    prev && typeof prev === 'object' && !Array.isArray(prev) ? { ...(prev as Record<string, unknown>) } : {};
+  next.baseUrl = finalBaseUrl;
+  next.api = 'openai';
+  if (!next.apiKey || typeof next.apiKey !== 'string') next.apiKey = 'ollama-lv';
+  providers['ollama-lv'] = next;
+  models.providers = providers;
+  base.models = models;
+  applyDefaultDiscordChannelStub(base);
+  try {
+    const configPath = getOpenClawConfigPath();
+    await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.promises.writeFile(configPath, JSON.stringify(base, null, 2), 'utf8');
+    await ensureProviderApiKeyProfile('ollama-lv', 'ollama-lv');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
+
 /** 仅去除行首的行注释与块注释，避免误删字符串内的 //（如 URL） */
 function stripJsonCommentsSafe(raw: string): string {
   return raw

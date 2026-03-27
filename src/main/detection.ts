@@ -10,6 +10,9 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 12000;
 const HTTP_TIMEOUT_MS = 10000;
 
+/** 本应用与 OpenClaw 相关工具链要求的 Node 主版本下限 */
+const MIN_NODE_MAJOR = 24;
+
 const SUPPORTED_PLATFORMS: Record<string, string[]> = {
   win32: ['x64', 'arm64'],
   darwin: ['x64', 'arm64'],
@@ -30,7 +33,8 @@ export interface DetectionReport {
   node: StepResult;
   npm: StepResult;
   openclaw: StepResult;
-  daemon: StepResult;
+  /** 网关 HTTP 是否可达（与是否由本应用启动无关） */
+  gateway: StepResult;
   config: StepResult;
   ollama: StepResult;
   canEnterGuide: boolean;
@@ -71,8 +75,8 @@ async function runNode(
       return { ok: false, version: raw, error: '无法解析 Node 版本' };
     }
     const major = parseInt(match[1], 10);
-    if (major < 22) {
-      return { ok: false, version: raw, error: `需要 Node.js 22+，当前: ${raw}` };
+    if (major < MIN_NODE_MAJOR) {
+      return { ok: false, version: raw, error: `需要 Node.js ${MIN_NODE_MAJOR}+，当前: ${raw}` };
     }
     let nodePath: string | undefined;
     try {
@@ -89,7 +93,7 @@ async function runNode(
   } catch (e: unknown) {
     const err = e as NodeJS.ErrnoException;
     const msg = err?.message || String(e);
-    return { ok: false, error: msg.includes('ENOENT') ? '未找到 Node，请先安装 Node.js 22+' : msg };
+    return { ok: false, error: msg.includes('ENOENT') ? `未找到 Node，请先安装 Node.js ${MIN_NODE_MAJOR}+` : msg };
   }
 }
 
@@ -158,12 +162,15 @@ async function httpGet(url: string, timeoutMs: number): Promise<boolean> {
   }
 }
 
-async function runDaemon(webContents: WebContents | null): Promise<StepResult> {
-  sendProgress(webContents, 'daemon', '正在检测 OpenClaw Daemon…');
+async function runGateway(webContents: WebContents | null): Promise<StepResult> {
+  sendProgress(webContents, 'gateway', '正在检测 OpenClaw 网关…');
   const ok = await httpGet('http://127.0.0.1:18789', HTTP_TIMEOUT_MS);
   return ok
     ? { ok: true, message: '网关已运行' }
-    : { ok: false, error: '未检测到 OpenClaw 网关。请点击「由本应用启动网关」或执行 openclaw onboard --install-daemon' };
+    : {
+        ok: false,
+        error: '未检测到 OpenClaw 网关。请在向导中点击「由本应用启动网关」，或在终端运行 openclaw gateway。',
+      };
 }
 
 async function runConfig(webContents: WebContents | null): Promise<StepResult> {
@@ -210,7 +217,7 @@ export async function runDetection(
   const node = await runNode(webContents, pathEnv);
   const npm = await runNpm(webContents, pathEnv);
   const openclaw = await runOpenClaw(webContents, pathEnv);
-  const daemon = await runDaemon(webContents);
+  const gateway = await runGateway(webContents);
   const config = await runConfig(webContents);
   const ollama = await runOllama(webContents);
 
@@ -219,7 +226,7 @@ export async function runDetection(
     { key: 'node', ok: node.ok },
     { key: 'npm', ok: npm.ok },
     { key: 'openclaw', ok: openclaw.ok },
-    { key: 'daemon', ok: daemon.ok },
+    { key: 'gateway', ok: gateway.ok },
     { key: 'config', ok: config.ok },
   ];
   const firstFailing = steps.find((s) => !s.ok);
@@ -230,7 +237,7 @@ export async function runDetection(
     node,
     npm,
     openclaw,
-    daemon,
+    gateway,
     config,
     ollama,
     canEnterGuide,

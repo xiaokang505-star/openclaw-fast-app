@@ -12,7 +12,7 @@ export interface DetectionReport {
   node: StepResult;
   npm: StepResult;
   openclaw: StepResult;
-  daemon: StepResult;
+  gateway: StepResult;
   config: StepResult;
   ollama: StepResult;
   canEnterGuide: boolean;

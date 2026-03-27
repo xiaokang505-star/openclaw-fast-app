@@ -24,6 +24,27 @@ export interface AppSettings {
   guiRequireConfirmForDangerous?: boolean;
 }
 
+export interface LlvOllamaTarget {
+  id: string;
+  baseUrl: string;
+  weight: number;
+  enabled: boolean;
+  apiKey?: string;
+}
+
+export interface LlvOllamaConfig {
+  enabled: boolean;
+  listenHost: string;
+  listenPort: number;
+  strategy: 'round_robin' | 'least_inflight' | 'weighted';
+  stickyByModel: boolean;
+  aggregateModels: boolean;
+  healthIntervalSec: number;
+  healthTimeoutMs: number;
+  healthFailThreshold: number;
+  targets: LlvOllamaTarget[];
+}
+
 export interface OpenClawFormConfig {
   modelSource?: 'cloud' | 'local';
   defaultModel?: string;
@@ -102,6 +123,13 @@ declare global {
       onDetectionProgress: (callback: (data: { step: string; message: string }) => void) => () => void;
       getSettings: () => Promise<AppSettings>;
       setSettings: (s: AppSettings) => Promise<void>;
+      getLlvOllamaConfig: () => Promise<LlvOllamaConfig>;
+      setLlvOllamaConfig: (cfg: Partial<LlvOllamaConfig>) => Promise<LlvOllamaConfig>;
+      probeLlvOllamaTarget: (baseUrl: string, apiKey?: string) => Promise<{ ok: boolean; status?: number; error?: string }>;
+      getLlvOllamaProcessStatus: () => Promise<{ running: boolean; pid?: number; lastError?: string }>;
+      startLlvOllamaProcess: () => Promise<{ success: boolean; error?: string; alreadyRunning?: boolean }>;
+      stopLlvOllamaProcess: () => Promise<{ success: boolean }>;
+      applyLlvProviderToOpenClaw: (baseUrl: string) => Promise<{ success: boolean; error?: string }>;
       nvmIsInstalled: () => Promise<boolean>;
       nvmInstall: () => Promise<{ success: boolean; error?: string }>;
       nvmInstallVersion: (version: string, nodeMirror?: string) => Promise<{ success: boolean; stdout: string; stderr: string; error?: string }>;
@@ -133,7 +161,6 @@ declare global {
       applyLocalModel: (modelName: string) => Promise<{ success: boolean; error?: string }>;
       onOllamaServeProgress: (callback: (msg: string) => void) => () => void;
       installOpenClaw: () => Promise<{ success: boolean; stdout: string; stderr: string; error?: string }>;
-      installDaemon: () => Promise<{ success: boolean; stdout: string; stderr: string; error?: string }>;
       startGatewayInProcess: () => Promise<{ success: boolean; error?: string; alreadyRunning?: boolean }>;
       stopGatewayInProcess: () => Promise<{ success: boolean }>;
       onInstallOpenClawProgress: (callback: (data: { type: string; data: string }) => void) => () => void;

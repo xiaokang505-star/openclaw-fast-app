@@ -7,10 +7,10 @@ import { getSettings, getPathEnvAsync } from './settings';
 import { getGatewayChatConfig, isCurrentPortServingGateway } from './openclaw-chat';
 import { ensureGatewayChatCompletionsEnabled, getOpenClawConfigPath } from './openclaw-config';
 
-/** 由本应用启动的网关子进程（未调用 install-daemon，兼容性更好） */
+/** 由本应用启动的网关子进程 */
 let gatewayChild: ChildProcess | null = null;
 
-/** 打开 Node 官方下载页，由用户选择对应平台与 LTS 版本（需 Node 22+） */
+/** 打开 Node 官方下载页，由用户选择对应平台与 LTS 版本（需 Node 24+） */
 function getNodeDownloadUrl(): string {
   return 'https://nodejs.org/en/download/';
 }
@@ -75,62 +75,20 @@ export async function installOpenClawHandler(
   });
 }
 
-export async function installDaemonHandler(): Promise<{
-  success: boolean;
-  stdout: string;
-  stderr: string;
-  error?: string;
-}> {
-  const settings = await getSettings();
-  const pathEnv = await getPathEnvAsync(settings);
-  return new Promise((resolve) => {
-    const cmd = process.platform === 'win32' ? 'openclaw.cmd' : 'openclaw';
-    const child = spawn(cmd, ['onboard', '--install-daemon'], {
-      env: { ...pathEnv, CI: '1' },
-      shell: process.platform === 'win32',
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.on('error', (err) => {
-      resolve({
-        success: false,
-        stdout,
-        stderr,
-        error: err.message,
-      });
-    });
-    child.on('close', (code) => {
-      resolve({
-        success: code === 0,
-        stdout,
-        stderr,
-        error: code !== 0 ? `进程退出码: ${code}` : undefined,
-      });
-    });
-  });
-}
-
 /** 冷启动或首次拉模型时网关可能较慢；过短易误报「未响应」 */
 const GATEWAY_START_WAIT_MS = 90_000;
 
-/** OpenClaw 网关运行时要求 Node >=22.16（与 CLI 入口的 22.12 校验可能不一致） */
+/** OpenClaw 可能仍提示旧版 Node 要求；本应用统一要求 Node 24+ */
 function gatewayLogHint(tail: string): string {
-  if (/Node\s*>=?\s*22\.16|requires Node >=22\.16/i.test(tail)) {
+  if (/Node\s*>=?\s*\d+|requires Node >=\d/i.test(tail)) {
     return (
-      '\n\n提示：当前全局 OpenClaw 要求 Node.js 22.16.0 或更高。若在终端执行 `node -v` 低于 22.16，请用 nvm 升级：' +
-      '`nvm install 22`（或 `nvm install node`）后 `nvm alias default 22`，再在应用「设置」中填写 Node 可执行文件路径并保存，然后重新「由本应用启动网关」。'
+      '\n\n提示：本应用要求 Node.js 24 或更高。请在终端执行 `node -v` 确认；若版本不足，请用 nvm：`nvm install 24` 后 `nvm alias default 24`，再在应用「设置」中填写 Node 可执行文件路径并保存，然后重新「由本应用启动网关」。'
     );
   }
   return '';
 }
 
-/** 由本应用直接启动网关进程（不安装系统 Daemon，兼容性更好；关闭应用后网关会停止） */
+/** 由本应用直接启动网关进程（关闭应用后由本进程拉起的网关会停止） */
 export async function startGatewayInProcessHandler(): Promise<{
   success: boolean;
   error?: string;
